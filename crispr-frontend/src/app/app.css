@@ -1,0 +1,128 @@
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 40px 20px;
+  font-family: 'Inter', -apple-system, sans-serif;
+  color: #333;
+}
+
+h1 {
+  font-size: 2.5rem;
+  margin-bottom: 30px;
+  background: linear-gradient(90deg, #007bff, #6610f2);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.config-section {
+  background: #fff;
+  padding: 25px;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+  margin-bottom: 30px;
+  border: 1px solid #eee;
+}
+
+.results-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+.file-result-section {
+  border-top: 2px solid #f0f0f0;
+  padding-top: 30px;
+}
+
+.file-header {
+  margin-bottom: 20px;
+  color: #555;
+  font-size: 1.2rem;
+}
+
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+  gap: 25px;
+}
+
+.result-card {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 8px 16px rgba(0,0,0,0.08);
+  border: 1px solid #f0f0f0;
+  transition: transform 0.2s;
+}
+
+.result-card:hover {
+  transform: translateY(-4px);
+}
+
+.card-header {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin-bottom: 20px;
+  color: #1a1a1a;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.target-badge {
+  background: #e7f1ff;
+  color: #007bff;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.stats-container {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 15px;
+  margin-bottom: 25px;
+}
+
+.stat-item {
+  background: #f8f9fa;
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.stat-label {
+  display: block;
+  font-size: 0.75rem;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.stat-value {
+  display: block;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #333;
+}
+
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 15px;
+  margin-top: 20px;
+}
+
+.chart-container {
+  position: relative;
+  height: 200px;
+  width: 100%;
+}
+
+pre.raw-json {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 20px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 0.85rem;
+}

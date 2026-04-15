@@ -1,0 +1,23 @@
+# Node / Angular
+node_modules/
+dist/
+.angular/
+.npm
+.cache/
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+
+# MacOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
