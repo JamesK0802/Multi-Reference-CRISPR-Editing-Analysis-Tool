@@ -1,55 +1,149 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 import os
+import json
+import shutil
+import tempfile
+import uuid
+import time
 
 # Import our perfectly separated backend logic
-from run_local import process_directory
+from run_local import process_files
 
 app = FastAPI(title="CRISPR Analysis API")
 
-# Define the expected structure for a single target
-class TargetModel(BaseModel):
-    target_id: str
-    reference_seq: str
-    sgrna_seq: str
-    window_size: int = 20
+# Add CORS middleware to allow frontend communication
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # For development, allow all origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-class AnalysisRequest(BaseModel):
-    fastq_dir: str
-    data_type: str = "single-end"
-    window_size: int = 20
-    phred_threshold: int = 30
-    indel_threshold: float = 1.0
-    targets: List[TargetModel]
+# Simple In-Memory Task Storage
+tasks = {}
 
-@app.post("/analyze")
-def run_analysis_endpoint(request: AnalysisRequest):
-    """
-    Kicks off the CRISPR FASTQ analysis pipeline.
-    """
+@app.get("/status/{task_id}")
+async def get_task_status(task_id: str):
+    # Log status check for debugging
+    print(f"[DEBUG] Status checked for {task_id}")
+    if task_id not in tasks:
+        print(f"[ERROR] Task {task_id} not found in store.")
+        raise HTTPException(status_code=404, detail="Task not found")
+    return tasks[task_id]
+
+# IMPORTANT: Change to regular 'def' to run in a threadpool and NOT block the event loop
+def background_analysis(
+    task_id: str,
+    temp_dir: str,
+    file_paths: List[str],
+    target_dicts: List[dict],
+    data_type: str,
+    phred_threshold: int,
+    indel_threshold: float
+):
+    print(f"[DEBUG] Background thread started for task {task_id}")
     try:
-        # Validate directory existence early
-        if not os.path.isdir(request.fastq_dir):
-            raise HTTPException(status_code=400, detail=f"Directory '{request.fastq_dir}' not found.")
-            
-        # Convert Pydantic models back to simple dicts for our analyzer loop
-        target_dicts = [t.dict() for t in request.targets]
-        
-        # Immediately apply global window_size
-        for t in target_dicts:
-            t["window_size"] = request.window_size
-        
-        # Call the exact same core pipeline we built in previous phases
-        results = process_directory(
-            request.fastq_dir, 
+        def update_progress(percent: int, stage: str):
+            print(f"[DEBUG] Task {task_id} progress: {percent}% - {stage}")
+            tasks[task_id]["progress"] = percent
+            tasks[task_id]["stage"] = stage
+
+        # Immediate update to confirm the thread is alive
+        update_progress(0, "Backend thread started")
+
+        # Call the core pipeline with progress callback
+        results = process_files(
+            file_paths, 
             target_dicts,
-            data_type=request.data_type,
-            phred_threshold=request.phred_threshold,
-            indel_threshold=request.indel_threshold
+            data_type=data_type,
+            phred_threshold=phred_threshold,
+            indel_threshold=indel_threshold,
+            progress_callback=update_progress
         )
         
-        return results
+        tasks[task_id]["progress"] = 100
+        tasks[task_id]["stage"] = "Completed"
+        tasks[task_id]["result"] = results
+        print(f"[DEBUG] Task {task_id} completed successfully.")
         
     except Exception as e:
+        print(f"[ERROR] Task {task_id} failed: {str(e)}")
+        tasks[task_id]["status"] = "failed"
+        tasks[task_id]["error"] = str(e)
+    finally:
+        shutil.rmtree(temp_dir)
+        print(f"[DEBUG] Temp dir {temp_dir} cleaned up.")
+
+@app.post("/analyze")
+async def run_analysis_endpoint(
+    background_tasks: BackgroundTasks,
+    files: List[UploadFile] = File(...),
+    data_type: str = Form("single-end"),
+    interest_region: int = Form(90), # Default 90
+    phred_threshold: int = Form(10), # Default 10
+    indel_threshold: float = Form(1.0),
+    targets: str = Form(...)
+):
+    """
+    Starts the CRISPR analysis and returns a task_id for progress polling.
+    Uses CRISPRnano terminology (gRNA, reference_sequence, interest_region).
+    """
+    # Clamp Interest Region (60-120)
+    clamped_interest = max(60, min(120, interest_region))
+    if clamped_interest != interest_region:
+        print(f"[DEBUG] Interest region clamped from {interest_region} to {clamped_interest}")
+
+    print(f"[DEBUG] Analyze request received. Files: {len(files)}")
+    task_id = str(uuid.uuid4())
+    temp_dir = tempfile.mkdtemp()
+    file_paths = []
+    
+    tasks[task_id] = {
+        "status": "processing",
+        "progress": 0,
+        "stage": "Upload received",
+        "result": None
+    }
+
+    try:
+        # 1. Save uploaded files
+        for file in files:
+            file_path = os.path.join(temp_dir, file.filename)
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            file_paths.append(file_path)
+        print(f"[DEBUG] Files saved to {temp_dir}")
+            
+        # 2. Parse targets
+        try:
+            raw_targets = json.loads(targets)
+            target_dicts = []
+            for t in raw_targets:
+                target_dicts.append({
+                    "target_id": t.get("target_id"),
+                    "sgrna_seq": t.get("gRNA"),
+                    "reference_seq": t.get("reference_sequence"),
+                    "window_size": clamped_interest # Use clamped value
+                })
+            print(f"[DEBUG] Parsed {len(target_dicts)} targets.")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid format for 'targets' array.")
+
+        # 3. Hand off to background task
+        background_tasks.add_task(
+            background_analysis,
+            task_id, temp_dir, file_paths, target_dicts, 
+            data_type, phred_threshold, indel_threshold
+        )
+        print(f"[DEBUG] Background task added to queue.")
+        
+        return {"task_id": task_id}
+        
+    except Exception as e:
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+        print(f"[ERROR] Analyze request failed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -3,15 +3,17 @@ import sys
 import json
 import os
 from core.parser import parse_fastq
-from core.aligner import process_read, extract_window, calculate_cut_site
+from core.aligner import process_read, extract_window, calculate_cut_site, find_target_in_reference, reverse_complement
 from core.analyzer import compare_windows, classify_mutation
 
 def run_analysis(fastq_file, targets):
     """
     Main analysis pipeline. Parses FASTQ once and runs analysis against multiple targets.
-    Ready to be imported directly into a future FastAPI endpoint!
+    Handles orientation detection for reference and reads.
     """
+    print(f"  [RUN_ANALYSIS] Parsing {fastq_file}...")
     sequences = parse_fastq(fastq_file)
+    print(f"  [RUN_ANALYSIS] Found {len(sequences)} sequences.")
     
     final_output = {
         "fastq_file": fastq_file,
@@ -24,29 +26,47 @@ def run_analysis(fastq_file, targets):
         sgrna_seq = target.get("sgrna_seq")
         window_size = target.get("window_size", 20)
         
-        # Pre-calculate reference window
-        ref_sgrna_start = reference_seq.find(sgrna_seq)
-        ref_cut_site = calculate_cut_site(ref_sgrna_start, sgrna_seq)
+        if not reference_seq:
+            continue
+
+        # Step 1: Detect gRNA orientation in Reference
+        # returns (start_index, is_rc)
+        ref_sgrna_start, is_rc_in_ref = find_target_in_reference(reference_seq, sgrna_seq)
+        
+        if ref_sgrna_start == -1:
+            print(f"  [WARNING] Target {target_id} (gRNA: {sgrna_seq}) not found in reference seq!")
+            continue
+
+        print(f"  [DEBUG] Target '{target_id}' found at idx {ref_sgrna_start} (RC: {is_rc_in_ref})")
+
+        # Step 2: Pre-calculate reference window
+        # calculate_cut_site handles the orientation logic
+        ref_cut_site = calculate_cut_site(ref_sgrna_start, sgrna_seq, is_rc=is_rc_in_ref)
         ref_window = extract_window(reference_seq, ref_cut_site, window_size)
         
-        # Statistics counters and detailed read list for this target
-        target_result = {
-            "target_id": target_id,
-            "summary": {
-                "total_reads": len(sequences),
-                "matched_reads": 0,
-                "unmodified": 0,
-                "modified": 0,
-                "insertion": 0,
-                "deletion": 0,
-                "substitution": 0,
-                "complex_modified": 0
-            },
-            "read_details": [] # Optional per-read classification
+        # If the target is RC in ref, our reference window is "looking" at an RC gRNA.
+        # To make it comparable with reads (which we normalize to forward gRNA in process_read),
+        # we must normalize this ref_window to forward orientation too.
+        if is_rc_in_ref:
+            ref_window = reverse_complement(ref_window)
+            print(f"  [DEBUG] Reference window normalized for RC target.")
+
+        # Statistics counters
+        counts = {
+            "total_reads": len(sequences),
+            "matched_reads": 0,
+            "wildtype": 0,
+            "substitution": 0,
+            "insertion": 0,
+            "deletion": 0,
+            "mixed": 0
         }
 
-        # Process each read for this specific target
+        read_details = []
+
+        # Process each read
         for i, seq in enumerate(sequences):
+            # process_read handles bi-directional search and normalization
             cut_site, read_window = process_read(seq, sgrna_seq, window_size)
             
             detail = {
@@ -57,27 +77,66 @@ def run_analysis(fastq_file, targets):
             
             if cut_site is not None:
                 detail["target_found"] = True
-                target_result["summary"]["matched_reads"] += 1
+                counts["matched_reads"] += 1
                 
+                # Now both windows are normalized to the same orientation
                 classification = classify_mutation(ref_window, read_window)
                 detail["classification"] = classification
                 
-                if classification == "unmodified":
-                    target_result["summary"]["unmodified"] += 1
-                else:
-                    target_result["summary"]["modified"] += 1
-                    target_result["summary"][classification] += 1
+                if classification in counts:
+                    counts[classification] += 1
                     
-            target_result["read_details"].append(detail)
+            if i < 1000: # Limit detail for large files to keep JSON manageable
+                read_details.append(detail)
             
+        # Matched reads is our denominator for percentages (except efficiency)
+        aligned = counts["matched_reads"]
+        total = counts["total_reads"]
+        indels = counts["insertion"] + counts["deletion"] + counts["mixed"]
+        modified = aligned - counts["wildtype"]
+
+        # Calculate percentages
+        def percent(val, den): return round((val / den * 100), 2) if den > 0 else 0.0
+
+        target_result = {
+            "target_id": target_id,
+            "summary": {
+                "total_reads": total,
+                "matched_reads": aligned,
+                "aligned_reads": aligned,
+                "unmodified": counts["wildtype"],
+                "modified": modified,
+                "indel_freq": percent(indels, aligned),
+                "indel_percent": percent(indels, aligned),
+                "sub_freq": percent(counts["substitution"], aligned),
+                "sub_percent": percent(counts["substitution"], aligned),
+                "insertion_percent": percent(counts["insertion"], aligned),
+                "deletion_percent": percent(counts["deletion"], aligned),
+                "mixed_percent": percent(counts["mixed"], aligned),
+                "editing_efficiency": percent(modified, total)
+            },
+            "breakdown": {
+                "wildtype": counts["wildtype"],
+                "substitution": counts["substitution"],
+                "insertion": counts["insertion"],
+                "deletion": counts["deletion"],
+                "mixed": counts["mixed"]
+            },
+            "read_details": read_details
+        }
+
         final_output["target_results"].append(target_result)
         
     return final_output
 
-def process_directory(directory_path, targets, data_type="single-end", phred_threshold=30, indel_threshold=1.0):
+def process_files(file_paths, targets, data_type="single-end", phred_threshold=30, indel_threshold=1.0, progress_callback=None):
     """
-    Finds all fastq files in a directory and processes them in sequence.
+    Processes a specific list of file paths.
     """
+    print(f"[PROCESS_FILES] Starting analysis of {len(file_paths)} files.")
+    if progress_callback:
+        progress_callback(10, "Parsing FASTQ files")
+
     final_payload = {
         "metadata": {
             "data_type": data_type,
@@ -87,35 +146,32 @@ def process_directory(directory_path, targets, data_type="single-end", phred_thr
         "results": []
     }
     
-    # Iterate over files in the directory
-    for filename in sorted(os.listdir(directory_path)):
-        if filename.endswith(".fastq") or filename.endswith(".fq"):
-            filepath = os.path.join(directory_path, filename)
-            # Run analysis identically on each file
+    total_files = len(file_paths)
+    for i, filepath in enumerate(file_paths):
+        if os.path.exists(filepath):
+            if progress_callback:
+                percent = 10 + int((i / total_files) * 80)
+                progress_callback(percent, f"Processing sample {i+1} of {total_files}")
+            
             file_results = run_analysis(filepath, targets)
             final_payload["results"].append(file_results)
+            
+    if progress_callback:
+        progress_callback(95, "Finalizing")
             
     return final_payload
 
 def main():
-    parser = argparse.ArgumentParser(description="CRISPR Analysis MVP")
+    parser = argparse.ArgumentParser(description="CRISPR Analysis Orientation Fix")
     parser.add_argument("fastq_dir", help="Path to the directory containing FASTQ files")
-    
     args = parser.parse_args()
     
-    # Hardcoded list of targeted CRISPR locations
     targets = [
         {
-            "target_id": "Target_1_Main",
-            "reference_seq": "GATTTGGGGTTCAAAGCAGTATCGATCAAATAGTAAATCCATTTGTTCAACTCACAGTTT",
-            "sgrna_seq": "ATCGATCAAATAGTAAATCC",
-            "window_size": 20
-        },
-        {
-            "target_id": "Target_2_Secondary",
-            "reference_seq": "ATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCG",
-            "sgrna_seq": "ATCGATCGATCGATCGATCG",
-            "window_size": 20
+            "target_id": "Nicole",
+            "reference_seq": "ctaggattaatcagacatgcgcagttatataataatcagtttgattttcttttccttttcgagcccctctctctctcactcttttcttttccgagaacccaacaaaaaaaaagctactattaatccttcccctcgtgaggaaatcatttcttcttgtttctcgagatttattctctttctctctctctttctctgtgtgtttcgtgtcttcagattagttcgATGTTTCGTTCAGACAAGGCGGAAAAAATGGATAAACGACGACGGAGACAGAGCAAAGCCAAGGCTTCTTGTTCCGAAGgtctgatttctctttgtttctctctatatctttttgatcggtttgagtctgattttgtatgtttgtttcgcagAGGTGAGTAGTATCGAATGGGAAGCTGTGAAGATGTCAGAAGAAGAAGAAGATCTCATTTCTCGGATGTATAAACTCGTTGGCGACAGgttagagactctttctctctcgatccatcttgttgctttctcttttttttggtctttcatgttttgtcgaatctgcttagattttgatctcaaagtcggtcgtttatttatgcattttcttggtttttctattatattattgggtctaacttaccgagctgtcaatgactgtgttcagcctgatttttgatcttgttattattctctgttttttgttttagttgttcaaatagcaaaacctaatcaagatttcgttttcagtttctttttttatatatgattctttagcaaaacatattcttaatttatgtcagaactcactttggctagtttggttcaattttgattacagcatgtttgtatgaagtcaaagtgtaaattacgattttggttcggttccatagaattttaaccgaattacaaactttatgcggtttttatcggaataaaaggtatttggttaagtgtaagttcctcaacactgactgttagcctatcctacgtggcgcgtagGTGGGAGTTGATCGCCGGAAGGATCCCGGGACGGACGCCGGAGGAGATAGAGAGATATTGGCTTATGAAACACGGCGTCGTTTTTGCCAACAGACGAAGAGACTTTTTTAGGAAATGAttttttttgtttggattaaaagaaaattttcctctccttaattcacaagacaagaaaaaaaggaaatgtacctgtccttgaattactattttggaatgtataattatctatatatataagaagaaaaaattgcttaggaatttcaaatttttaccagcctccatcgacacatgatatatc",
+            "sgrna_seq": "AATATCTCTCTATCTCCTC",
+            "window_size": 90
         }
     ]
     
@@ -123,13 +179,9 @@ def main():
         if not os.path.isdir(args.fastq_dir):
             raise ValueError(f"The path '{args.fastq_dir}' is not a valid directory.")
             
-        results_data = process_directory(args.fastq_dir, targets)
-        
-        # Print JSON formatting
-        json_output = json.dumps(results_data, indent=2)
-        print(json_output)
-        
-        # Also return structurally
+        file_paths = [os.path.join(args.fastq_dir, f) for f in os.listdir(args.fastq_dir) if f.endswith(('.fastq', '.fq'))]
+        results_data = process_files(file_paths, targets)
+        print(json.dumps(results_data, indent=2))
         return results_data
         
     except Exception as e:

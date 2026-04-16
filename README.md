@@ -1,23 +1,25 @@
 # CRISPR Editing Analysis Tool
 
-A professional full-stack platform for analyzing CRISPR FASTQ sequencing data. This tool processes raw sequencing files to identify genome editing events, classifies mutations, and provides interactive visualizations for multi-target analysis.
+A professional full-stack platform for analyzing CRISPR FASTQ sequencing data. This tool processes raw sequencing files to identify genome editing events, classifies mutations with high precision, and provides interactive visualizations for multi-target analysis.
 
 ## Overview
 
-The CRISPR Editing Analysis Tool is designed for researchers looking for a straightforward, local pipeline to quantify genome editing efficiency. It handles the extraction of cut-site windows, performs alignment comparisons against reference sequences, and generates high-level summaries of unmodified vs. modified reads.
+The CRISPR Editing Analysis Tool is a robust, local pipeline designed to quantify genome editing efficiency. By performing orientation-aware alignment and detailed mutation categorization, it provides researchers with highly accurate metrics for Indel frequency and mutation distribution.
 
-## Features
+## Key Features
 
-- **FASTQ Processing**: Support for `.fastq` and `.fq` single-end sequencing files.
-- **Multi-Target Analysis**: Analyze multiple sgRNA targets within a single sequencing run.
-- **Mutation Classification**: Detects and localizes Insertions, Deletions, and Substitutions.
-- **Interactive Visualization**: Real-time dashboard with bar charts for Edit Rate and Mutation Profiles.
-- **Structured Data**: Exports comprehensive analysis in JSON format for downstream processing.
-- **Parameter Control**: Adjustable window size, quality thresholds, and data type selection.
+- **Orientation-Aware Alignment**: Automatically detects if a gRNA is forward or reverse-complement in the reference. Features bi-directional read search to maximize alignment rates for real-world sequencing data.
+- **Detailed Mutation Classification**: Precisely categorizes every read into `Wildtype`, `Substitution`, `Insertion`, `Deletion`, or `Mixed` mutations.
+- **Standardized Stats**: Calculates Indel and Substitution rates using **Aligned Reads** as the denominator, ensuring biological accuracy.
+- **Interactive Dashboard**:
+  - **Mutation Distribution Pie Chart**: Visualize the breakdown of editing outcomes.
+  - **Edit Rate Bar Charts**: Track efficiency across multiple samples and targets.
+  - **Real-time Status Log**: Decoupled communication history with manual state tracking.
+- **Resilient UI Mapping**: Optimized frontend data pipelines that handle variations in backend naming conventions (snake_case vs camelCase).
 
 ## Tech Stack
 
-- **Backend**: Python 3.9+, [FastAPI](https://fastapi.tiangolo.com/), [Pydantic](https://docs.pydantic.dev/)
+- **Backend**: Python 3.9+, [FastAPI](https://fastapi.tiangolo.com/), [Biopython](https://biopython.org/), [Pydantic](https://docs.pydantic.dev/)
 - **Frontend**: [Angular 21](https://angular.dev/), [Chart.js](https://www.chartjs.org/)
 - **Future Integration**: Ollama + Gemma (for LLM-based sequence interpretation)
 
@@ -47,9 +49,9 @@ The CRISPR Editing Analysis Tool is designed for researchers looking for a strai
    python -m venv venv
    source venv/bin/activate  # Mac/Linux
    ```
-3. Install dependencies:
+3. Install dependencies (Requires Biopython):
    ```bash
-   pip install -r requirements.txt
+   pip install fastapi uvicorn biopython python-multipart
    ```
 
 ### Frontend
@@ -67,8 +69,11 @@ The CRISPR Editing Analysis Tool is designed for researchers looking for a strai
 1. **Start Backend**:
    ```bash
    cd crispr_backend
+   source venv/bin/activate
    uvicorn api:app --reload --port 8000
    ```
+   - **Main URL**: `http://localhost:8000`
+   - **Swagger UI**: `http://localhost:8000/docs`
 
 2. **Start Frontend**:
    ```bash
@@ -80,28 +85,12 @@ The CRISPR Editing Analysis Tool is designed for researchers looking for a strai
 
 ## Example Usage
 
-1. Enter the absolute path to your FASTQ directory in the UI.
-2. Provide target definitions in JSON format:
-   ```json
-   [
-     {
-       "target_id": "Target_1",
-       "reference_seq": "GATTTGGGGTTCAAAGCAGTATCGATCAAATAGTG...",
-       "sgrna_seq": "ATCGATCAAATAGTAAATCC"
-     }
-   ]
-   ```
-3. Set your desired **Window Size** and **Indel Threshold**.
-4. Click **Run Analysis** to view the interactive charts.
-
-## Future Improvements
-
-- **LLM Interpretation**: Integration with [Ollama](https://ollama.com/) to provide natural language explanations of complex mutation patterns.
-- **Paired-End Support**: Native merging of R1 and R2 reads.
-- **Batch Export**: PDF reporting and batch CSV export for large-scale screenings.
-- **Quality Control**: Advanced Phred-score filtering and read trimming.
+1. **Upload Files**: Drag and drop `.fastq` or `.fq` files.
+2. **Define Targets**: Provide target IDs and reference sequences. The system will auto-detect the gRNA orientation.
+3. **Analyze**: Click **Run Analysis**. The results section will automatically appear at the top once the first target is processed.
+4. **Inspect**: Use the Pie Chart to see the mutation types and the detailed table for per-sample metrics.
 
 ## AI Usage Disclaimer
 
 > [!NOTE]
-> This project was developed with the assistance of AI coding agents (including ChatGPT and Claude-based tools). While AI contributed to boilerplate generation and specific logic implementations, the overall architecture, scientific design decisions, and system integration were guided and verified by the developer.
+> This project was developed with the assistance of AI coding agents. While AI contributed to logic implementations and dashboard styling, the architectural pivots (such as the orientation-aware alignment engine) were guided and verified by the developer to ensure scientific correctness.

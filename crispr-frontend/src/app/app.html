@@ -1,92 +1,201 @@
-<div class="container" style="max-width: 800px; margin: 0 auto; padding: 20px; font-family: sans-serif;">
-  <h1>CRISPR Analysis</h1>
+<div class="container">
+  <div class="header-section">
+    <h1>CRISPR Analysis Tool</h1>
+    <div class="controls">
+      <button (click)="toggleMockMode()" [class.active]="useMock" class="btn-toggle">
+        {{ useMock ? 'Using Mock Data' : 'Live Upload Mode' }}
+      </button>
+    </div>
+  </div>
   
-  <div style="margin-bottom: 20px;">
-    <label style="display: block; font-weight: bold; margin-bottom: 5px;">FASTQ Directory:</label>
-    <input type="text" [(ngModel)]="fastqDir" placeholder="/path/to/fastq/dir" style="width: 100%; padding: 8px; box-sizing: border-box;" />
+  <!-- Results Dashboard (MOVED TO TOP FOR DIAGNOSIS) -->
+  <div *ngIf="result" class="results-dashboard" id="resultsSection" 
+       style="display: block !important; visibility: visible !important; opacity: 1 !important; border: 8px solid #2ecc71; margin-bottom: 30px; background: white; z-index: 9999; position: relative; padding: 20px;">
+    
+    <div style="background: #ffeb3b; color: #000; padding: 12px; text-align: center; font-weight: bold; border-radius: 8px; margin-bottom: 20px; border: 2px solid #fbc02d;">
+      🚀 🚀 [CRITICAL DEBUG] RESULTS ROOT VISIBLE 🚀 🚀
+    </div>
+
+    <div class="metrics-grid">
+      <div class="metric-card"><span class="m-label">Total Reads</span><span class="m-value">{{ metrics.totalReads | number }}</span></div>
+      <div class="metric-card"><span class="m-label">Aligned Reads</span><span class="m-value">{{ metrics.alignedReads | number }}</span></div>
+      <div class="metric-card highlight"><span class="m-label">Avg Indel %</span><span class="m-value">{{ metrics.avgIndelFreq | number:'1.1-2' }}%</span></div>
+      <div class="metric-card"><span class="m-label">Avg Sub %</span><span class="m-value">{{ metrics.avgSubFreq | number:'1.1-2' }}%</span></div>
+    </div>
+
+    <div class="metrics-grid secondary">
+      <div class="metric-card ins"><span class="m-label">Avg Insertion %</span><span class="m-value">{{ metrics.avgInsertionFreq | number:'1.1-2' }}%</span></div>
+      <div class="metric-card del"><span class="m-label">Avg Deletion %</span><span class="m-value">{{ metrics.avgDeletionFreq | number:'1.1-2' }}%</span></div>
+    </div>
+
+    <!-- Charts Section -->
+    <div class="charts-section">
+      <div class="chart-card pie"><canvas id="mutationPieChart"></canvas></div>
+      <div class="chart-card"><canvas id="indelChart"></canvas></div>
+      <div class="chart-card donut"><canvas id="donutChart"></canvas></div>
+    </div>
+
+    <!-- Table -->
+    <div class="table-card">
+      <h3>Detailed Summary Table</h3>
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>Sample</th>
+              <th>Target</th>
+              <th>Total</th>
+              <th>Aligned</th>
+              <th>Indel %</th>
+              <th>Ins %</th>
+              <th>Del %</th>
+              <th>Sub %</th>
+              <th>Efficiency</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let row of summaryTableData">
+              <td>{{ row.sample }}</td>
+              <td><span class="badge">{{ row.target }}</span></td>
+              <td>{{ row.total | number }}</td>
+              <td>{{ row.matched | number }}</td>
+              <td><strong>{{ row.indel | number:'1.1-2' }}%</strong></td>
+              <td>{{ row.insertion | number:'1.1-2' }}%</td>
+              <td>{{ row.deletion | number:'1.1-2' }}%</td>
+              <td>{{ row.sub | number:'1.1-2' }}%</td>
+              <td><span class="efficiency-tag">{{ row.efficiency | number:'1.1-2' }}%</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div style="text-align: center; padding: 10px; color: #2ecc71; font-weight: bold;">
+      🚀 RESULTS ROOT END VISIBLE 🚀
+    </div>
   </div>
 
-  <div style="margin-bottom: 20px; display: flex; gap: 15px; flex-wrap: wrap;">
-    <div style="flex: 1; min-width: 150px;">
-      <label style="display: block; font-weight: bold; margin-bottom: 5px;">Data Type:</label>
-      <select [(ngModel)]="dataType" style="width: 100%; padding: 8px; box-sizing: border-box;">
-        <option value="single-end">Single-end</option>
-        <option value="paired-end">Paired-end</option>
-      </select>
-    </div>
-    <div style="flex: 1; min-width: 150px;">
-      <label style="display: block; font-weight: bold; margin-bottom: 5px;">Window Size:</label>
-      <input type="number" [(ngModel)]="windowSize" style="width: 100%; padding: 8px; box-sizing: border-box;" />
-    </div>
-    <div style="flex: 1; min-width: 150px;">
-      <label style="display: block; font-weight: bold; margin-bottom: 5px;">Phred Thresh:</label>
-      <input type="number" [(ngModel)]="phredThreshold" style="width: 100%; padding: 8px; box-sizing: border-box;" />
-    </div>
-    <div style="flex: 1; min-width: 150px;">
-      <label style="display: block; font-weight: bold; margin-bottom: 5px;">Indel Thresh (%):</label>
-      <input type="number" step="0.1" [(ngModel)]="indelThreshold" style="width: 100%; padding: 8px; box-sizing: border-box;" />
-    </div>
-  </div>
-
-  <div style="margin-bottom: 20px;">
-    <label style="display: block; font-weight: bold; margin-bottom: 5px;">Targets (JSON):</label>
-    <textarea [(ngModel)]="targetsJson" rows="10" style="width: 100%; padding: 8px; box-sizing: border-box; font-family: monospace;"></textarea>
-  </div>
-
-  <button (click)="runAnalysis()" [disabled]="isLoading" style="padding: 10px 20px; background: #007bff; color: white; border: none; cursor: pointer; border-radius: 4px; font-size: 16px;">
-    {{ isLoading ? 'Running Analysis...' : 'Run Analysis' }}
-  </button>
-
-  <div *ngIf="error" style="margin-top: 20px; padding: 15px; background: #ffebee; color: #c62828; border-radius: 4px;">
-    <strong>Error:</strong> {{ error }}
-  </div>
-
-  <div *ngIf="result" class="results-dashboard">
-    <div *ngFor="let fileRes of result.results; let fIdx = index" class="file-result-section">
-      <h2 class="file-header">File: {{ fileRes.fastq_file }}</h2>
+  <!-- Configuration Form -->
+  <form [formGroup]="analysisForm" (ngSubmit)="runAnalysis()">
+    <div class="config-section">
       
-      <div class="cards-grid">
-        <div *ngFor="let targetRes of fileRes.target_results; let tIdx = index" class="result-card">
-          <div class="card-header">
-            <span>Result</span>
-            <span class="target-badge">{{ targetRes.target_id }}</span>
-          </div>
+      <!-- Drag & Drop Upload Zone -->
+      <div 
+        class="upload-zone" 
+        [class.dragging]="isDragging"
+        (drop)="onFileDropped($event)"
+        (dragover)="onDragOver($event)"
+        (dragleave)="onDragLeave($event)"
+        (click)="fileInput.click()"
+      >
+        <input type="file" #fileInput (change)="onFileSelected($event)" multiple hidden accept=".fastq,.fq" />
+        <div class="upload-icon">📁</div>
+        <p><strong>Drag & Drop FASTQ files</strong> or click to browse</p>
+        <span class="hint">Supports Illumina .fastq and .fq files</span>
+      </div>
 
-          <div class="stats-container">
-            <div class="stat-item">
-              <span class="stat-label">Total Reads</span>
-              <span class="stat-value">{{ targetRes.summary.total_reads }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-label">Matched</span>
-              <span class="stat-value">{{ targetRes.summary.matched_reads }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-label">Unmodified</span>
-              <span class="stat-value" style="color: #4bc0c0;">{{ targetRes.summary.unmodified }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-label">Modified</span>
-              <span class="stat-value" style="color: #ff6384;">{{ targetRes.summary.modified }}</span>
-            </div>
-          </div>
+      <!-- Selected Files List -->
+      <div class="file-list" *ngIf="selectedFiles.length > 0">
+        <div *ngFor="let file of selectedFiles; let i = index" class="file-item">
+          <span class="file-name">{{ file.name }}</span>
+          <span class="file-size">({{ file.size / 1024 / 1024 | number:'1.1-1' }} MB)</span>
+          <button type="button" class="btn-remove" (click)="removeFile(i)">&times;</button>
+        </div>
+      </div>
 
-          <div class="charts-row">
-            <div class="chart-container">
-              <canvas [id]="'chart-' + fIdx + '-' + tIdx"></canvas>
+      <!-- Progress Section (Only visible while loading) -->
+      <div class="progress-section" *ngIf="isLoading">
+        <div class="progress-header">
+          <span class="stage-text">{{ progressStage }}</span>
+          <span class="percent-text">{{ progress }}%</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" [style.width.%]="progress"></div>
+        </div>
+      </div>
+
+      <!-- Communication Status Log (Always visible if logs exist) -->
+      <div class="status-log-container" *ngIf="debugLogs.length > 0">
+        <div class="status-log">
+          <div class="log-title">Communication Log:</div>
+          <div class="log-entries">
+            <div *ngFor="let log of debugLogs" class="log-entry">{{ log }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Parameters -->
+      <div class="form-row secondary">
+        <div class="form-group">
+          <label>Data Type:</label>
+          <select formControlName="dataType">
+            <option value="single-end">Single-end</option>
+            <option value="paired-end">Paired-end</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Interest region (+/- bp):</label>
+          <input type="number" formControlName="interestRegion" min="60" max="120" placeholder="60-120"
+                 [class.invalid]="analysisForm.get('interestRegion')?.invalid && analysisForm.get('interestRegion')?.touched" />
+          <span class="hint-text">Range: 60 - 120 bp</span>
+        </div>
+        <div class="form-group">
+          <label>Phred Threshold:</label>
+          <input type="number" formControlName="phredThreshold" />
+        </div>
+        <div class="form-group">
+          <label>Indel Threshold (%):</label>
+          <input type="number" step="0.1" formControlName="indelThreshold" />
+        </div>
+      </div>
+
+      <hr class="divider" />
+
+      <!-- Dynamic Targets Section -->
+      <div class="targets-section">
+        <div class="section-header">
+          <h2>Targets Configuration</h2>
+          <button type="button" class="btn-add" (click)="addTarget()">+ Add New Target</button>
+        </div>
+
+        <div formArrayName="targets">
+          <div *ngFor="let target of targets.controls; let i = index" [formGroupName]="i" class="target-card">
+            <div class="target-card-header">
+              <h3>Target #{{ i + 1 }}</h3>
+              <button type="button" class="btn-remove-target" (click)="removeTarget(i)" *ngIf="targets.length > 1">Remove</button>
             </div>
-            <div class="chart-container">
-              <canvas [id]="'profile-' + fIdx + '-' + tIdx"></canvas>
+            
+            <div class="target-card-body">
+              <div class="form-group">
+                <label>Target ID:</label>
+                <input type="text" formControlName="target_id" placeholder="e.g. HEK4_Site"
+                       [class.invalid]="target.get('target_id')?.invalid && target.get('target_id')?.touched" />
+              </div>
+              
+              <div class="form-group">
+                <label>gRNA:</label>
+                <input type="text" formControlName="gRNA" placeholder="20bp sequence"
+                       [class.invalid]="target.get('gRNA')?.invalid && target.get('gRNA')?.touched" />
+              </div>
+              
+              <div class="form-group full">
+                <label>Reference sequence:</label>
+                <textarea formControlName="reference_sequence" rows="3" class="monospaced" placeholder="Complete amplicon sequence"
+                          [class.invalid]="target.get('reference_sequence')?.invalid && target.get('reference_sequence')?.touched"></textarea>
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- Raw Data Toggle (Optional/Debugging) -->
-    <details style="margin-top: 50px; opacity: 0.6;">
-      <summary style="cursor: pointer; font-weight: 600;">Show Raw Analysis JSON</summary>
-      <pre class="raw-json">{{ result | json }}</pre>
-    </details>
+      <button type="submit" [disabled]="isLoading || (selectedFiles.length === 0 && !useMock)" class="btn-primary">
+        {{ isLoading ? 'Analysis in Progress...' : 'Start CRISPR Analysis' }}
+      </button>
+    </div>
+  </form>
+
+  <!-- Error Display -->
+  <div *ngIf="error" class="error-box">
+    <strong>Error:</strong> {{ error }}
   </div>
+
 </div>
