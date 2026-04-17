@@ -2,11 +2,13 @@ from Bio import SeqIO
 
 def parse_fastq(filepath):
     """
-    Reads a FASTQ file and returns a list of sequence strings.
+    Reads a FASTQ file and returns a list of (sequence, quality_scores) tuples.
     """
-    sequences = []
+    results = []
     # Read the fastq file
     with open(filepath, "r") as handle:
         for record in SeqIO.parse(handle, "fastq"):
-            sequences.append(str(record.seq))
-    return sequences
+            seq = str(record.seq)
+            qual = record.letter_annotations["phred_quality"]
+            results.append((seq, qual))
+    return results

@@ -1,9 +1,8 @@
 export interface AnalysisBreakdown {
-  wildtype: number;
+  no_indel: number;
   substitution: number;
-  insertion: number;
-  deletion: number;
-  mixed: number;
+  in_frame: number;
+  out_of_frame: number;
 }
 
 export interface AnalysisSummary {
@@ -15,19 +14,31 @@ export interface AnalysisSummary {
   editing_efficiency: number;
   
   // Percentages (denominated by matched_reads)
-  indel_freq: number;
-  sub_freq: number;
-  indel_percent: number;
-  sub_percent: number;
-  insertion_percent: number;
-  deletion_percent: number;
-  mixed_percent: number;
+  out_of_frame_pct: number;
+  in_frame_pct: number;
+  no_indel_pct: number;
+  substitution_pct: number;
 }
 
 export interface ReadDetail {
   read_index: number;
   target_found: boolean;
-  classification: 'wildtype' | 'substitution' | 'insertion' | 'deletion' | 'mixed' | null;
+  classification: 'out_of_frame' | 'in_frame' | 'substitution' | 'no_indel' | null;
+}
+
+export interface AlignmentToken {
+  type: 'equal' | 'substitute' | 'delete' | 'insert';
+  val: string;
+}
+
+export interface MutationGroup {
+  group_rank: number;
+  read_inner: string;
+  read_count: number;
+  read_pct: number;
+  classification: string;
+  net_indel: number;
+  tokens: AlignmentToken[];
 }
 
 export interface TargetResult {
@@ -35,6 +46,9 @@ export interface TargetResult {
   summary: AnalysisSummary;
   breakdown: AnalysisBreakdown;
   read_details: ReadDetail[];
+  ref_sequence?: string;
+  cut_site_index?: number;
+  top_groups?: MutationGroup[];
 }
 
 export interface FileResult {

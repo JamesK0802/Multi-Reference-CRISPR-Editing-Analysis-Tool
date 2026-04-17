@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectorRef, NgZone } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, FormArray, Validators } from '@angular/forms';
 import { AnalysisService, TaskStatus } from './services/analysis.service';
@@ -34,17 +34,18 @@ export class App implements OnInit, OnDestroy {
   metrics = { 
     totalReads: 0, 
     alignedReads: 0, 
-    avgIndelFreq: 0, 
-    avgSubFreq: 0,
-    avgInsertionFreq: 0,
-    avgDeletionFreq: 0
+    avgOutOfFrame: 0,
+    avgInFrame: 0,
+    avgNoIndel: 0,
+    avgSubstitution: 0
   };
   private charts: Chart[] = [];
 
   constructor(
     private fb: FormBuilder,
     private analysisService: AnalysisService,
-    private cdr: ChangeDetectorRef 
+    private cdr: ChangeDetectorRef,
+    private ngZone: NgZone
   ) {}
 
   ngOnInit() {
@@ -123,6 +124,9 @@ export class App implements OnInit, OnDestroy {
       this.destroyCharts();
       this.isLoading = true;
       this.progress = 0;
+      
+      // Force change detection immediately so UI shows "Loading..." state before HTTP request blocks
+      this.cdr.detectChanges();
 
       const formData = new FormData();
       if (this.selectedFiles.length > 0) {
@@ -138,16 +142,20 @@ export class App implements OnInit, OnDestroy {
 
       this.analysisService.runAnalysis(formData).subscribe({
         next: (res: any) => {
-          if (this.useMock) {
-            this.handleAnalysisComplete(res);
-          } else {
-            this.startPolling(res.task_id);
-          }
+          this.ngZone.run(() => {
+            if (this.useMock) {
+              this.handleAnalysisComplete(res);
+            } else {
+              this.startPolling(res.task_id);
+            }
+          });
         },
         error: (err) => {
-          this.error = err.message;
-          this.isLoading = false;
-          this.cdr.detectChanges();
+          this.ngZone.run(() => {
+            this.error = err.message;
+            this.isLoading = false;
+            this.cdr.detectChanges();
+          });
         }
       });
     } catch (e: any) {
@@ -163,198 +171,215 @@ export class App implements OnInit, OnDestroy {
       switchMap(() => this.analysisService.getTaskStatus(taskId))
     ).subscribe({
       next: (status: TaskStatus) => {
-        this.progress = status.progress;
-        this.progressStage = status.stage;
-        if (status.status === 'failed') {
-          this.error = status.error || 'Backend analysis failed.';
-          this.isLoading = false;
-          this.destroy$.next();
-        } else if (status.progress === 100 && status.result) {
-          this.handleAnalysisComplete(status.result);
-          this.destroy$.next();
-        }
-        this.cdr.detectChanges();
+        this.ngZone.run(() => {
+          this.progress = status.progress;
+          this.progressStage = status.stage;
+          if (status.status === 'failed') {
+            this.error = status.error || 'Backend analysis failed.';
+            this.isLoading = false;
+            this.destroy$.next();
+          } else if (status.progress === 100 && status.result) {
+            this.handleAnalysisComplete(status.result);
+            this.destroy$.next();
+          }
+          this.cdr.detectChanges();
+        });
       },
       error: () => {
-        this.error = 'Lost connection to status endpoint.';
-        this.isLoading = false;
-        this.destroy$.next();
-        this.cdr.detectChanges();
+        this.ngZone.run(() => {
+          this.error = 'Lost connection to status endpoint.';
+          this.isLoading = false;
+          this.destroy$.next();
+          this.cdr.detectChanges();
+        });
       }
     });
   }
 
   private handleAnalysisComplete(res: AnalysisResponse) {
-    console.log('[DEBUG] --- RAW RESPONSE PATH VERIFICATION ---');
-    console.log('[DEBUG] Response Object:', res);
-    console.log('[DEBUG] results array length:', res.results?.length);
-    
-    try {
-      this.result = res;
-      this.calculateMetrics();
+    this.ngZone.run(() => {
+      console.log('[DEBUG] --- RAW RESPONSE PATH VERIFICATION ---');
+      console.log('[DEBUG] Response Object:', res);
       
-      this.progress = 100;
-      this.progressStage = 'Analysis Complete';
-      this.isLoading = false; 
-      
-      this.addLog('Dashboard updated with results.');
-      this.cdr.detectChanges(); 
-      
-      setTimeout(() => {
-        const element = document.getElementById('resultsSection');
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          console.log('[DEBUG] Scrolled to resultsSection element.');
-        }
-      }, 300);
-
-      setTimeout(() => {
-        try {
-          this.createCharts();
-        } catch (ce) {
-          console.error('[DEBUG] createCharts failed:', ce);
-        }
-        this.cdr.detectChanges();
+      try {
+        this.result = res;
+        this.selectedRowIndex = 0;
+        this.refreshDashboard();
         
-        // Final sanity check
-        console.log('[DEBUG] --- FINAL UI METRICS ---');
-        console.log('[DEBUG] metrics.totalReads:', this.metrics.totalReads);
-        console.log('[DEBUG] metrics.alignedReads:', this.metrics.alignedReads);
-      }, 500);
+        this.progress = 100;
+        this.progressStage = 'Analysis Complete';
+        this.isLoading = false; 
+        
+        this.addLog('Dashboard updated with results.');
+        this.cdr.detectChanges(); 
+        
+        setTimeout(() => {
+          const element = document.getElementById('resultsSection');
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }, 300);
 
-    } catch (e: any) {
-      console.error('[DEBUG] handleAnalysisComplete critical error:', e);
-      this.isLoading = false;
-      this.cdr.detectChanges();
-    }
+        setTimeout(() => {
+          this.cdr.detectChanges();
+        }, 500);
+
+      } catch (e: any) {
+        console.error('[DEBUG] handleAnalysisComplete critical error:', e);
+        this.isLoading = false;
+        this.cdr.detectChanges();
+      }
+    });
   }
 
-  private calculateMetrics() {
+  selectedRowIndex: number = 0;
+
+  get flatTargets() {
+    if (!this.result || !this.result.results) return [];
+    return this.result.results.flatMap(f =>
+      (f.target_results || []).map(t => ({ file: f, target: t }))
+    );
+  }
+
+  get summaryTableData() {
+    return this.flatTargets.map((item, index) => ({
+      index,
+      sample: item.file.sample_name || item.file.fastq_file.split('/').pop(),
+      target: item.target.target_id,
+      total: item.target.summary.total_reads || 0,
+      matched: item.target.summary.matched_reads || 0,
+      outOfFrame: item.target.summary.out_of_frame_pct || 0,
+      inFrame: item.target.summary.in_frame_pct || 0,
+      noIndel: item.target.summary.no_indel_pct || 0,
+      substitution: item.target.summary.substitution_pct || 0
+    }));
+  }
+
+  selectRow(index: number) {
+    this.selectedRowIndex = index;
+    this.refreshDashboard();
+  }
+
+  selectedTarget: any = null;
+
+  private refreshDashboard() {
     if (!this.result || !this.result.results) {
-      console.warn('[DEBUG] calculateMetrics returning early: no results array found.');
+      console.warn('[DEBUG] refreshDashboard: no results array found.');
       return;
     }
-    
-    let totalReads = 0, alignedReads = 0, totalIndelFreq = 0, totalSubFreq = 0;
-    let totalInsFreq = 0, totalDelFreq = 0, count = 0;
-    
-    this.result.results.forEach((file, fIdx) => {
-      console.log(`[DEBUG] Mapping File #${fIdx}: ${file.sample_name || file.fastq_file}`);
-      (file.target_results || []).forEach((target, tIdx) => {
-        if (target.summary) {
-          const s = target.summary;
-          // Support both snake_case and camelCase for maximum path resilience
-          const tReads = s.total_reads ?? (s as any).totalReads ?? 0;
-          const aReads = s.matched_reads ?? s.aligned_reads ?? (s as any).alignedReads ?? 0;
-          const iPerc = s.indel_percent ?? s.indel_freq ?? 0;
-          const sPerc = s.sub_percent ?? s.sub_freq ?? 0;
-          const insPerc = s.insertion_percent ?? 0;
-          const delPerc = s.deletion_percent ?? 0;
 
-          console.log(`[DEBUG]   Target #${tIdx} (${target.target_id}): reads=${tReads}, aligned=${aReads}, indel=${iPerc}%`);
+    const flat = this.flatTargets;
+    if (flat.length === 0) return;
 
-          totalReads += tReads;
-          alignedReads += aReads;
-          totalIndelFreq += iPerc;
-          totalSubFreq += sPerc;
-          totalInsFreq += insPerc;
-          totalDelFreq += delPerc;
-          count++;
-        }
-      });
-    });
-    
+    if (this.selectedRowIndex >= flat.length || this.selectedRowIndex < 0) {
+      this.selectedRowIndex = 0;
+    }
+
+    const selectedFile = flat[this.selectedRowIndex].file;
+    this.selectedTarget = flat[this.selectedRowIndex].target;
+
     this.metrics = {
-      totalReads, alignedReads,
-      avgIndelFreq: count > 0 ? totalIndelFreq / count : 0,
-      avgSubFreq: count > 0 ? totalSubFreq / count : 0,
-      avgInsertionFreq: count > 0 ? totalInsFreq / count : 0,
-      avgDeletionFreq: count > 0 ? totalDelFreq / count : 0
+      totalReads: this.selectedTarget.summary.total_reads || 0,
+      alignedReads: this.selectedTarget.summary.matched_reads || 0,
+      avgOutOfFrame: this.selectedTarget.summary.out_of_frame_pct || 0,
+      avgInFrame: this.selectedTarget.summary.in_frame_pct || 0,
+      avgNoIndel: this.selectedTarget.summary.no_indel_pct || 0,
+      avgSubstitution: this.selectedTarget.summary.substitution_pct || 0,
     };
-    console.log('[DEBUG] Final Calculated Metrics Object:', this.metrics);
+
+    // ── Debug log ──────────────────────────────────────────────────────────
+    console.log('[DEBUG] refreshDashboard ===========================');
+    console.log(`  Selected Target: ${this.selectedTarget.target_id}`);
+    console.log(`  total_reads: ${this.metrics.totalReads}`);
+    console.log(`  aligned_reads: ${this.metrics.alignedReads}`);
+    console.log(`  Out-of-frame %: ${this.metrics.avgOutOfFrame.toFixed(2)}%`);
+    console.log('[DEBUG] ============================================');
+
+    // Force Angular to update the view immediately with new metrics
+    this.cdr.detectChanges();
+
+    // Automatically update charts for selected target too
+    // Give DOM a microtask to ensure canvas exists if first loaded
+    setTimeout(() => {
+      this.updateChartsForSelected();
+      this.cdr.detectChanges();
+    }, 50);
   }
 
-  private destroyCharts() { this.charts.forEach(c => c.destroy()); this.charts = []; }
+  private destroyCharts() { 
+    this.charts.forEach(c => c.destroy()); 
+    this.charts = []; 
+  }
 
-  private createCharts() {
-    if (!this.result || !this.result.results) return;
+  private updateChartsForSelected() {
+    this.destroyCharts();
 
+    const flat = this.flatTargets;
+    if (flat.length === 0) return;
+    const selectedData = flat[this.selectedRowIndex].target;
+    // For bar charts, we still want to show all targets for easy comparison
     const indelCtx = document.getElementById('indelChart') as HTMLCanvasElement;
     if (indelCtx) {
       this.charts.push(new Chart(indelCtx, {
         type: 'bar',
         data: {
-          labels: this.result.results.map(f => f.sample_name || f.fastq_file.split('/').pop()),
-          datasets: [{
-            label: 'Avg Indel %',
-            data: this.result.results.map(f => {
-              const targets = f.target_results || [];
-              return targets.length > 0 ? targets.reduce((acc, t) => acc + (t.summary.indel_percent ?? t.summary.indel_freq ?? 0), 0) / targets.length : 0;
-            }),
-            backgroundColor: '#36a2eb'
-          }]
+          labels: flat.map(item => `${item.file.sample_name || item.file.fastq_file.split('/').pop()} (${item.target.target_id})`),
+          datasets: [
+            {
+              label: 'Out-of-frame %',
+              data: flat.map(item => item.target.summary.out_of_frame_pct || 0),
+              backgroundColor: '#e74c3c'
+            },
+            {
+              label: 'In-frame %',
+              data: flat.map(item => item.target.summary.in_frame_pct || 0),
+              backgroundColor: '#e67e22'
+            }
+          ]
         },
-        options: { responsive: true, maintainAspectRatio: false }
+        options: { 
+          responsive: true, 
+          maintainAspectRatio: false,
+          scales: { x: { stacked: true }, y: { stacked: true } }
+        }
       }));
     }
 
+    // Pie chart -> ONLY selected target
     const pieCtx = document.getElementById('mutationPieChart') as HTMLCanvasElement;
-    if (pieCtx) {
-      const globalBreakdown = { wildtype: 0, substitution: 0, insertion: 0, deletion: 0, mixed: 0 };
-      this.result.results.forEach(f => {
-        (f.target_results || []).forEach(t => {
-          if (t.breakdown) {
-            globalBreakdown.wildtype += (t.breakdown.wildtype || 0);
-            globalBreakdown.substitution += (t.breakdown.substitution || 0);
-            globalBreakdown.insertion += (t.breakdown.insertion || 0);
-            globalBreakdown.deletion += (t.breakdown.deletion || 0);
-            globalBreakdown.mixed += (t.breakdown.mixed || 0);
-          }
-        });
-      });
-
+    if (pieCtx && selectedData.breakdown) {
       this.charts.push(new Chart(pieCtx, {
         type: 'pie',
         data: {
-          labels: ['Wildtype', 'Substitution', 'Insertion', 'Deletion', 'Mixed'],
+          labels: ['No Indel', 'Substitution', 'In-frame', 'Out-of-frame'],
           datasets: [{
             data: [
-              globalBreakdown.wildtype, globalBreakdown.substitution,
-              globalBreakdown.insertion, globalBreakdown.deletion, globalBreakdown.mixed
+              selectedData.breakdown.no_indel || 0, 
+              selectedData.breakdown.substitution || 0,
+              selectedData.breakdown.in_frame || 0, 
+              selectedData.breakdown.out_of_frame || 0
             ],
-            backgroundColor: ['#2ecc71', '#3498db', '#e67e22', '#e74c3c', '#9b59b6']
+            backgroundColor: ['#2ecc71', '#3498db', '#e67e22', '#e74c3c']
           }]
         },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Mutation Distribution' } } }
+        options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: `Mutation Distribution (${selectedData.target_id})` } } }
       }));
     }
 
+    // Donut chart -> ONLY selected target
     const donutCtx = document.getElementById('donutChart') as HTMLCanvasElement;
-    if (donutCtx) {
-      let mod = 0, unmod = 0;
-      this.result.results.forEach(f => (f.target_results || []).forEach(t => { mod += (t.summary.modified || 0); unmod += (t.summary.unmodified || 0); }));
+    if (donutCtx && selectedData.summary) {
       this.charts.push(new Chart(donutCtx, {
         type: 'doughnut',
-        data: { labels: ['Edited', 'Unedited'], datasets: [{ data: [mod, unmod], backgroundColor: ['#ff6384', '#cccccc'] }] },
-        options: { responsive: true, maintainAspectRatio: false }
+        data: { 
+          labels: ['Edited', 'Unedited'], 
+          datasets: [{ 
+            data: [selectedData.summary.modified || 0, selectedData.summary.unmodified || 0], 
+            backgroundColor: ['#ff6384', '#cccccc'] 
+          }] 
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: `Editing Efficiency (${selectedData.target_id})` } } }
       }));
     }
-  }
-
-  get summaryTableData() {
-    if (!this.result || !this.result.results) return [];
-    return this.result.results.flatMap(f => 
-      (f.target_results || []).map(t => ({
-        sample: f.sample_name || f.fastq_file.split('/').pop(),
-        target: t.target_id,
-        total: t.summary.total_reads ?? (t.summary as any).totalReads ?? 0,
-        matched: t.summary.matched_reads ?? t.summary.aligned_reads ?? 0,
-        indel: t.summary.indel_percent ?? t.summary.indel_freq ?? 0,
-        sub: t.summary.sub_percent ?? t.summary.sub_freq ?? 0,
-        insertion: t.summary.insertion_percent ?? 0,
-        deletion: t.summary.deletion_percent ?? 0,
-        efficiency: t.summary.editing_efficiency ?? 0
-      }))
-    );
   }
 }

@@ -12,20 +12,15 @@
   <div *ngIf="result" class="results-dashboard" id="resultsSection" 
        style="display: block !important; visibility: visible !important; opacity: 1 !important; border: 8px solid #2ecc71; margin-bottom: 30px; background: white; z-index: 9999; position: relative; padding: 20px;">
     
-    <div style="background: #ffeb3b; color: #000; padding: 12px; text-align: center; font-weight: bold; border-radius: 8px; margin-bottom: 20px; border: 2px solid #fbc02d;">
-      🚀 🚀 [CRITICAL DEBUG] RESULTS ROOT VISIBLE 🚀 🚀
-    </div>
+
 
     <div class="metrics-grid">
       <div class="metric-card"><span class="m-label">Total Reads</span><span class="m-value">{{ metrics.totalReads | number }}</span></div>
       <div class="metric-card"><span class="m-label">Aligned Reads</span><span class="m-value">{{ metrics.alignedReads | number }}</span></div>
-      <div class="metric-card highlight"><span class="m-label">Avg Indel %</span><span class="m-value">{{ metrics.avgIndelFreq | number:'1.1-2' }}%</span></div>
-      <div class="metric-card"><span class="m-label">Avg Sub %</span><span class="m-value">{{ metrics.avgSubFreq | number:'1.1-2' }}%</span></div>
-    </div>
-
-    <div class="metrics-grid secondary">
-      <div class="metric-card ins"><span class="m-label">Avg Insertion %</span><span class="m-value">{{ metrics.avgInsertionFreq | number:'1.1-2' }}%</span></div>
-      <div class="metric-card del"><span class="m-label">Avg Deletion %</span><span class="m-value">{{ metrics.avgDeletionFreq | number:'1.1-2' }}%</span></div>
+      <div class="metric-card out-of-frame"><span class="m-label">Out-of-frame %</span><span class="m-value">{{ metrics.avgOutOfFrame | number:'1.1-2' }}%</span></div>
+      <div class="metric-card in-frame"><span class="m-label">In-frame %</span><span class="m-value">{{ metrics.avgInFrame | number:'1.1-2' }}%</span></div>
+      <div class="metric-card no-indel"><span class="m-label">No Indel %</span><span class="m-value">{{ metrics.avgNoIndel | number:'1.1-2' }}%</span></div>
+      <div class="metric-card sub"><span class="m-label">Substitution %</span><span class="m-value">{{ metrics.avgSubstitution | number:'1.1-2' }}%</span></div>
     </div>
 
     <!-- Charts Section -->
@@ -46,31 +41,102 @@
               <th>Target</th>
               <th>Total</th>
               <th>Aligned</th>
-              <th>Indel %</th>
-              <th>Ins %</th>
-              <th>Del %</th>
+              <th>Out-of-frame %</th>
+              <th>In-frame %</th>
+              <th>No Indel %</th>
               <th>Sub %</th>
-              <th>Efficiency</th>
+
             </tr>
           </thead>
           <tbody>
-            <tr *ngFor="let row of summaryTableData">
+            <tr *ngFor="let row of summaryTableData; let i = index" 
+                (click)="selectRow(i)" 
+                [style.background-color]="i === selectedRowIndex ? '#e8f8f5' : ''"
+                [style.border-left]="i === selectedRowIndex ? '4px solid #2ecc71' : '4px solid transparent'"
+                style="cursor: pointer; transition: background-color 0.2s;">
               <td>{{ row.sample }}</td>
               <td><span class="badge">{{ row.target }}</span></td>
               <td>{{ row.total | number }}</td>
               <td>{{ row.matched | number }}</td>
-              <td><strong>{{ row.indel | number:'1.1-2' }}%</strong></td>
-              <td>{{ row.insertion | number:'1.1-2' }}%</td>
-              <td>{{ row.deletion | number:'1.1-2' }}%</td>
-              <td>{{ row.sub | number:'1.1-2' }}%</td>
-              <td><span class="efficiency-tag">{{ row.efficiency | number:'1.1-2' }}%</span></td>
+              <td><strong>{{ row.outOfFrame | number:'1.1-2' }}%</strong></td>
+              <td>{{ row.inFrame | number:'1.1-2' }}%</td>
+              <td>{{ row.noIndel | number:'1.1-2' }}%</td>
+              <td>{{ row.substitution | number:'1.1-2' }}%</td>
+
             </tr>
           </tbody>
         </table>
       </div>
     </div>
-    <div style="text-align: center; padding: 10px; color: #2ecc71; font-weight: bold;">
-      🚀 RESULTS ROOT END VISIBLE 🚀
+
+  </div>
+
+  <!-- Annotation Panel -->
+  <div class="annotation-panel" *ngIf="result && selectedTarget && selectedTarget.top_groups && selectedTarget.top_groups.length > 0">
+    <div class="anno-header">
+      <h2>ANNOTATION</h2>
+      <div class="anno-legend">
+        <span class="legend-item"><span class="badge del-bg">-</span> DELETION</span>
+        <span class="legend-item"><span class="badge sub-bg">A</span> SUBSTITUTION</span>
+        <span class="legend-item"><span class="badge ins-badge">A</span> INSERTION</span>
+      </div>
+    </div>
+    
+    <!-- Reference Line -->
+    <div class="seq-group ref-group">
+      <div class="seq-label-col">
+        <span class="seq-label">REFERENCE 5'->3'</span>
+      </div>
+      
+      <div class="seq-mono-container">
+        <!-- gRNA row -->
+        <div class="grna-row" *ngIf="selectedTarget.grna_start_index !== -1" [style.left]="selectedTarget.grna_start_index + 'ch'">
+          <div class="grna-boxes">
+            <span class="base-box grna-box" *ngFor="let char of (selectedTarget.sgrna_seq || '').split('')">{{ char }}</span>
+          </div>
+          <div class="cut-marker-absolute" [style.left]="(selectedTarget.cut_site_index - selectedTarget.grna_start_index) + 'ch'">▼</div>
+        </div>
+        
+        <div class="seq-mono ref-seq">
+          <ng-container *ngFor="let char of (selectedTarget.ref_sequence || '').split('')">
+            <span class="base-box text-box">{{ char }}</span>
+          </ng-container>
+        </div>
+      </div>
+    </div>
+
+    <!-- Groups Loop -->
+    <div class="seq-group" *ngFor="let group of selectedTarget.top_groups">
+      <div class="seq-label-col">
+        <span class="seq-label">GROUP {{ group.group_rank }}</span>
+      </div>
+      
+      <div class="seq-mono-container">
+        <div class="seq-mono read-seq">
+          <ng-container *ngFor="let t of group.tokens">
+            <!-- If equal, split into individual characters -->
+            <ng-container *ngIf="t.type === 'equal'">
+              <span class="base-box text-box" *ngFor="let char of t.val.split('')">{{ char }}</span>
+            </ng-container>
+            
+            <ng-container *ngIf="t.type === 'substitute'">
+              <span class="base-box sub-bg" *ngFor="let char of t.val.split('')">{{ char }}</span>
+            </ng-container>
+            
+            <ng-container *ngIf="t.type === 'delete'">
+              <span class="base-box del-bg" *ngFor="let char of t.val.split('')">-</span>
+            </ng-container>
+            
+            <span *ngIf="t.type === 'insert'" class="ins-wrapper" [attr.data-ins]="t.val"></span>
+          </ng-container>
+        </div>
+      </div>
+      
+      <div class="seq-stats">
+        <strong>TYPE: {{ group.classification }}{{ group.net_indel ? ' ('+group.net_indel+' bp)' : ' (0 bp)' }}</strong>
+        <br>
+        <span class="stats-detail">| {{ group.read_count | number }} Reads, {{ group.read_pct }} %</span>
+      </div>
     </div>
   </div>
 

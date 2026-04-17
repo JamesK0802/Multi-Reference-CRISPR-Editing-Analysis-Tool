@@ -2,131 +2,257 @@ import argparse
 import sys
 import json
 import os
+import statistics
+import difflib
 from core.parser import parse_fastq
-from core.aligner import process_read, extract_window, calculate_cut_site, find_target_in_reference, reverse_complement
-from core.analyzer import compare_windows, classify_mutation
+from core.aligner import (process_read_with_anchors, extract_window,
+                           calculate_cut_site, find_target_in_reference,
+                           calculate_cut_site, find_target_in_reference,
+                           reverse_complement)
+from core.analyzer import classify_mutation_with_alignment
 
-def run_analysis(fastq_file, targets):
+
+def run_analysis(fastq_file, targets, phred_threshold=10, indel_threshold=1.0):
     """
-    Main analysis pipeline. Parses FASTQ once and runs analysis against multiple targets.
-    Handles orientation detection for reference and reads.
+    Main analysis pipeline — CRISPRnano-compatible.
+
+    Filtering pipeline (mirrors CRISPRnano):
+        1. Both flanking anchors must be found in the read (exact match)
+        2. Inner-region Phred avg >= phred_threshold  (default Q10; CRISPRnano uses Q30)
+        3. Inner-region sequence similarity to ref_inner >= INNER_SIMILARITY_MIN
+           (rejects off-target reads where anchors matched by chance)
+        4. Classify by net_indel = len(read_inner) - len(ref_inner)
+
+    Guarantees:
+        out_of_frame + in_frame + no_indel == aligned_reads
+        substitution ⊂ no_indel  (never mixed with indel classes)
     """
+    # ── Similarity threshold for inner region (0.85 drops noisy non-target sequences) ──
+    INNER_SIMILARITY_MIN = 0.85
+
     print(f"  [RUN_ANALYSIS] Parsing {fastq_file}...")
-    sequences = parse_fastq(fastq_file)
-    print(f"  [RUN_ANALYSIS] Found {len(sequences)} sequences.")
-    
+    data = parse_fastq(fastq_file)
+    total_reads = len(data)
+    print(f"  [RUN_ANALYSIS] Found {total_reads} sequences.")
+
     final_output = {
         "fastq_file": fastq_file,
         "target_results": []
     }
-    
+
     for target in targets:
-        target_id = target.get("target_id")
+        target_id     = target.get("target_id")
         reference_seq = target.get("reference_seq")
-        sgrna_seq = target.get("sgrna_seq")
-        window_size = target.get("window_size", 20)
-        
+        sgrna_seq     = target.get("sgrna_seq")
+        window_size   = target.get("window_size", 90)
+
         if not reference_seq:
             continue
 
-        # Step 1: Detect gRNA orientation in Reference
-        # returns (start_index, is_rc)
+        # ── Step 1: Locate gRNA in reference ──────────────────────────────────
         ref_sgrna_start, is_rc_in_ref = find_target_in_reference(reference_seq, sgrna_seq)
-        
         if ref_sgrna_start == -1:
-            print(f"  [WARNING] Target {target_id} (gRNA: {sgrna_seq}) not found in reference seq!")
+            print(f"  [WARNING] Target {target_id} not found in reference!")
             continue
 
-        print(f"  [DEBUG] Target '{target_id}' found at idx {ref_sgrna_start} (RC: {is_rc_in_ref})")
+        print(f"  [DEBUG] Target '{target_id}' found at idx {ref_sgrna_start} (RC={is_rc_in_ref})")
 
-        # Step 2: Pre-calculate reference window
-        # calculate_cut_site handles the orientation logic
+        # ── Step 2: Build reference window ────────────────────────────────────
         ref_cut_site = calculate_cut_site(ref_sgrna_start, sgrna_seq, is_rc=is_rc_in_ref)
-        ref_window = extract_window(reference_seq, ref_cut_site, window_size)
-        
-        # If the target is RC in ref, our reference window is "looking" at an RC gRNA.
-        # To make it comparable with reads (which we normalize to forward gRNA in process_read),
-        # we must normalize this ref_window to forward orientation too.
+        ref_window   = extract_window(reference_seq, ref_cut_site, window_size)
         if is_rc_in_ref:
             ref_window = reverse_complement(ref_window)
-            print(f"  [DEBUG] Reference window normalized for RC target.")
 
-        # Statistics counters
+        # Compute consistent ref_inner string for the groups
+        ref_inner_fixed = ref_window[12:-12].upper()
+        cut_site_index_fixed = len(ref_inner_fixed) // 2
+
+        # Calculate exact gRNA start in the inner window for frontend display
+        # Note: ref_window is already orientation-matched (reverse complemented if target was RC)
+        # sgrna_seq might be mixed case, so use upper()
+        grna_match_idx = ref_window.upper().find(sgrna_seq.upper())
+        grna_start_in_inner = grna_match_idx - 12 if grna_match_idx != -1 else -1
+
+        print(f"  [DEBUG] ref_window length: {len(ref_window)} bp, gRNA inner start: {grna_start_in_inner}")
+
+        # ── Step 3: Counters ──────────────────────────────────────────────────
         counts = {
-            "total_reads": len(sequences),
-            "matched_reads": 0,
-            "wildtype": 0,
-            "substitution": 0,
-            "insertion": 0,
-            "deletion": 0,
-            "mixed": 0
+            "total_reads":      total_reads,
+            "aligned_reads":    0,
+            "out_of_frame":     0,
+            "in_frame":         0,
+            "no_indel":         0,
+            "substitution":     0,   # subset of no_indel
+            "fail_no_anchor":   0,   # anchors not found
+            "fail_quality":     0,   # quality < phred_threshold
+            "fail_similarity":  0,   # inner region too divergent
         }
 
         read_details = []
+        groups_dict = {}
 
-        # Process each read
-        for i, seq in enumerate(sequences):
-            # process_read handles bi-directional search and normalization
-            cut_site, read_window = process_read(seq, sgrna_seq, window_size)
-            
-            detail = {
-                "read_index": i + 1,
-                "target_found": False,
-                "classification": None
-            }
-            
-            if cut_site is not None:
-                detail["target_found"] = True
-                counts["matched_reads"] += 1
-                
-                # Now both windows are normalized to the same orientation
-                classification = classify_mutation(ref_window, read_window)
-                detail["classification"] = classification
-                
-                if classification in counts:
-                    counts[classification] += 1
-                    
-            if i < 1000: # Limit detail for large files to keep JSON manageable
-                read_details.append(detail)
-            
-        # Matched reads is our denominator for percentages (except efficiency)
-        aligned = counts["matched_reads"]
-        total = counts["total_reads"]
-        indels = counts["insertion"] + counts["deletion"] + counts["mixed"]
-        modified = aligned - counts["wildtype"]
+        # ── Step 4: Process each read ─────────────────────────────────────────
+        for i, (seq, qual) in enumerate(data):
+            ref_inner, read_inner, read_qual = process_read_with_anchors(
+                seq, ref_window, quality_scores=qual, anchor_len=12
+            )
 
-        # Calculate percentages
-        def percent(val, den): return round((val / den * 100), 2) if den > 0 else 0.0
+            # Filter 1: anchors not found
+            if ref_inner is None:
+                counts["fail_no_anchor"] += 1
+                continue
 
+            # Filter 2: Phred quality of inner region
+            avg_q = statistics.mean(read_qual) if read_qual else 0
+            if avg_q < phred_threshold:
+                counts["fail_quality"] += 1
+                continue
+
+            # Filter 3: Inner-region similarity (rejects off-target reads)
+            # Use difflib ratio on shorter strings for speed. For reads with indels,
+            # we compare the shorter against the longer to get a fair similarity score.
+            shorter = ref_inner if len(ref_inner) <= len(read_inner) else read_inner
+            longer  = read_inner if len(ref_inner) <= len(read_inner) else ref_inner
+            sim = difflib.SequenceMatcher(None, shorter, longer).ratio()
+            if sim < INNER_SIMILARITY_MIN:
+                counts["fail_similarity"] += 1
+                continue
+
+            # Aligned: all three filters passed
+            counts["aligned_reads"] += 1
+
+            # Classify using exact token-based indel length calculator
+            category, has_sub, net_indel, read_tokens = classify_mutation_with_alignment(ref_inner.upper(), read_inner.upper())
+            counts[category] += 1
+            if has_sub:   
+                counts["substitution"] += 1
+
+            # Grouping for Annotation View
+            key = read_inner.upper()
+            if key not in groups_dict:
+                groups_dict[key] = {
+                    "read_inner": key,
+                    "read_count": 0,
+                    "classification": category,
+                    "net_indel": net_indel,
+                    "has_sub": has_sub,
+                    "tokens": read_tokens
+                }
+            groups_dict[key]["read_count"] += 1
+
+            if i < 1000:
+                read_details.append({
+                    "read_index":     i + 1,
+                    "target_found":   True,
+                    "net_indel":      len(read_inner) - len(ref_inner),
+                    "similarity":     round(sim, 3),
+                    "classification": category
+                })
+
+        # ── Step 5: Debug logging ─────────────────────────────────────────────
+        aligned = counts["aligned_reads"]
+        total   = counts["total_reads"]
+        sum_cls = counts["out_of_frame"] + counts["in_frame"] + counts["no_indel"]
+
+        # ── Indel Threshold Filter ──────────────────────────────────────────
+        # CRISPRnano systematically drops noisy groups that represent < N% of total aligned reads
+        # from the denominator to clean up the statistics.
+        threshold_count = aligned * (indel_threshold / 100.0)
+        
+        # We must re-tally the true aligned reads and classifications
+        # based ONLY on groups that pass the threshold.
+        passed_groups_dict = {}
+        for k, g in groups_dict.items():
+            if g["read_count"] >= threshold_count:
+                passed_groups_dict[k] = g
+
+        new_aligned = sum(g["read_count"] for g in passed_groups_dict.values())
+        new_out_of_frame = sum(g["read_count"] for g in passed_groups_dict.values() if g["classification"] == "out_of_frame")
+        new_in_frame_reads = sum(g["read_count"] for g in passed_groups_dict.values() if g["classification"] == "in_frame")
+        new_no_indel = sum(g["read_count"] for g in passed_groups_dict.values() if g["classification"] == "no_indel")
+        new_substitution = sum(g["read_count"] for g in passed_groups_dict.values() if g["classification"] == "no_indel" and g["has_sub"])
+        
+        counts["read_ambiguous"] = aligned - new_aligned
+        counts["aligned_passed"] = new_aligned
+
+        print(f"\n[DEBUG] ===== CRISPRnano-style Results: {target_id} =====")
+        print(f"  total_reads         = {total}")
+        print(f"  --- Filter breakdown ---")
+        print(f"  fail_no_anchor      = {counts['fail_no_anchor']}")
+        print(f"  fail_quality        = {counts['fail_quality']}   (phred < {phred_threshold})")
+        print(f"  fail_similarity     = {counts['fail_similarity']}  (inner sim < {INNER_SIMILARITY_MIN})")
+        print(f"  fail_threshold ({indel_threshold}%)  = {counts['read_ambiguous']}")
+        print(f"  aligned_reads       = {new_aligned}   ← true denominator for all %")
+        print(f"  --- Re-calculated Classification ---")
+        print(f"  out_of_frame_reads  = {new_out_of_frame}")
+        print(f"  in_frame_reads      = {new_in_frame_reads}")
+        print(f"  no_indel_reads      = {new_no_indel}")
+        print(f"  substitution_reads  = {new_substitution}  (subset of no_indel)")
+
+        def pct(val):
+            return round(val / new_aligned * 100, 2) if new_aligned > 0 else 0.0
+
+        print(f"\n  Out-of-frame %  = {new_out_of_frame} / {new_aligned} × 100 = {pct(new_out_of_frame)}%")
+        print(f"  In-frame %      = {new_in_frame_reads} / {new_aligned} × 100 = {pct(new_in_frame_reads)}%")
+        print(f"  No indel %      = {new_no_indel} / {new_aligned} × 100 = {pct(new_no_indel)}%")
+        print(f"  Substitution %  = {new_substitution} / {new_aligned} × 100 = {pct(new_substitution)}%")
+        print(f"[DEBUG] ================================================\n")
+
+        # ── Step 5b: Generate Top Groups for Annotation View ──────────────────
+        sorted_groups = sorted(passed_groups_dict.values(), key=lambda x: x["read_count"], reverse=True)[:10]
+        top_groups = []
+        
+        for idx, g in enumerate(sorted_groups):
+            group_pct = pct(g["read_count"])
+            
+            display_class = "Out-of-frame indel" if g["classification"] == "out_of_frame" else \
+                            "In-frame indel" if g["classification"] == "in_frame" else \
+                            "Substitution" if (g["classification"] == "no_indel" and g["has_sub"]) else \
+                            "No indel"
+
+            top_groups.append({
+                "group_rank": idx + 1,
+                "read_inner": g["read_inner"],
+                "read_count": g["read_count"],
+                "read_pct": group_pct,
+                "classification": display_class,
+                "net_indel": g["net_indel"],
+                "tokens": g["tokens"] # Pre-calculated during alignment loop
+            })
+
+        # ── Step 6: Build result payload ──────────────────────────────────────
         target_result = {
             "target_id": target_id,
             "summary": {
-                "total_reads": total,
-                "matched_reads": aligned,
-                "aligned_reads": aligned,
-                "unmodified": counts["wildtype"],
-                "modified": modified,
-                "indel_freq": percent(indels, aligned),
-                "indel_percent": percent(indels, aligned),
-                "sub_freq": percent(counts["substitution"], aligned),
-                "sub_percent": percent(counts["substitution"], aligned),
-                "insertion_percent": percent(counts["insertion"], aligned),
-                "deletion_percent": percent(counts["deletion"], aligned),
-                "mixed_percent": percent(counts["mixed"], aligned),
-                "editing_efficiency": percent(modified, total)
+                "total_reads":      total,
+                "matched_reads":    aligned,
+                "aligned_reads":    new_aligned,
+                "out_of_frame_pct": pct(new_out_of_frame),
+                "in_frame_pct":     pct(new_in_frame_reads),
+                "no_indel_pct":     pct(new_no_indel),
+                "substitution_pct": pct(new_substitution),
+                "modified":         new_out_of_frame + new_in_frame_reads,
+                "unmodified":       new_no_indel,
+                "read_ambiguous":   counts["read_ambiguous"]
             },
             "breakdown": {
-                "wildtype": counts["wildtype"],
+                "out_of_frame": counts["out_of_frame"],
+                "in_frame":     counts["in_frame"],
+                "no_indel":     counts["no_indel"],
                 "substitution": counts["substitution"],
-                "insertion": counts["insertion"],
-                "deletion": counts["deletion"],
-                "mixed": counts["mixed"]
+                "ambiguous":    counts["fail_quality"] + counts["fail_similarity"],
             },
-            "read_details": read_details
+            "target_id":        target_id,
+            "sgrna_seq":        sgrna_seq,
+            "grna_start_index": grna_start_in_inner,
+            "ref_sequence":     ref_inner_fixed,
+            "cut_site_index":   cut_site_index_fixed,
+            "read_details": read_details,
+            "top_groups": top_groups
         }
 
         final_output["target_results"].append(target_result)
-        
+
     return final_output
 
 def process_files(file_paths, targets, data_type="single-end", phred_threshold=30, indel_threshold=1.0, progress_callback=None):
@@ -153,7 +279,7 @@ def process_files(file_paths, targets, data_type="single-end", phred_threshold=3
                 percent = 10 + int((i / total_files) * 80)
                 progress_callback(percent, f"Processing sample {i+1} of {total_files}")
             
-            file_results = run_analysis(filepath, targets)
+            file_results = run_analysis(filepath, targets, phred_threshold, indel_threshold)
             final_payload["results"].append(file_results)
             
     if progress_callback:

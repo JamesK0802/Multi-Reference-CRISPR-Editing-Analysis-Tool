@@ -395,10 +395,181 @@ th, td {
 }
 
 .efficiency-tag {
-  background: #e8f8f5;
-  color: #16a085;
-  padding: 4px 8px;
   border-radius: 12px;
   font-size: 0.8rem;
   font-weight: 700;
+}
+
+/* Annotation Panel */
+.annotation-panel {
+  background: white;
+  padding: 20px;
+  border-radius: 10px;
+  margin-top: 20px;
+  overflow-x: auto;
+}
+
+.anno-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  border-bottom: 2px solid #f1f2f6;
+  padding-bottom: 10px;
+}
+
+.anno-header h2 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.anno-legend {
+  display: flex;
+  gap: 15px;
+  font-size: 0.8rem;
+  position: relative;
+}
+
+/* Annotation View Layout */
+.seq-group {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 25px;
+  overflow-x: auto;
+  padding-bottom: 15px; /* for insertion badges projecting down */
+  position: relative;
+  border-bottom: 1px dotted #e0e0e0;
+}
+.seq-group:last-child {
+  border-bottom: none;
+}
+
+.seq-label-col {
+  flex: 0 0 80px;
+  text-align: left;
+}
+
+.seq-label {
+  font-weight: 700;
+  font-size: 11px;
+  color: #333;
+  text-transform: uppercase;
+}
+
+.seq-mono-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.grna-row {
+  position: absolute;
+  top: -28px; /* Lifted higher to avoid overlap */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  z-index: 10;
+}
+
+.grna-boxes {
+  display: flex;
+}
+
+.grna-box {
+  background: #f7f9fb;
+  border-bottom: 2px solid #34495e;
+  font-size: 10px;
+  color: #34495e;
+  font-weight: 800;
+}
+
+.cut-marker-absolute {
+  position: absolute;
+  top: 12px;
+  font-size: 14px;
+  color: #f44336;
+  line-height: 1;
+  z-index: 15;
+  transform: translateX(0); /* Align to the left of the base box */
+}
+
+.seq-mono {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+}
+
+/* Base-box styling for the token grid */
+.base-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;  /* roughly 'ch' width in this font, but fixed */
+  height: 16px;
+  box-sizing: border-box;
+}
+
+.text-box {
+  color: #333;
+}
+
+.seq-stats {
+  font-size: 11px;
+  color: #333;
+  white-space: nowrap;
+  flex: 0 0 220px;
+  text-align: left;
+}
+
+.stats-detail {
+  color: #7f8c8d;
+}
+
+/* Token Styles */
+.sub-bg {
+  background-color: #fff0c2;
+  color: #b78a05;
+  border: 1px solid #f1c40f;
+  border-radius: 2px;
+}
+
+.del-bg {
+  background-color: #ffeaea;
+  color: #d32f2f;
+  border: 1px solid #ffbaba;
+  border-radius: 2px;
+  font-weight: bold;
+}
+
+/* Insertions take ZERO horizontal space in the main flow to preserve alignment */
+.ins-wrapper {
+  display: inline-block;
+  width: 0;
+  position: relative;
+}
+
+/* Then we draw the insertion hanging down */
+.ins-wrapper::after {
+  content: attr(data-ins);
+  position: absolute;
+  top: 14px;
+  left: -4px; /* tweak based on letter spacing */
+  background: #2196f3;
+  color: white;
+  font-size: 10px;
+  padding: 1px 2px;
+  border: 1px solid #1976d2;
+  border-radius: 2px;
+  line-height: 1;
+  z-index: 10;
+}
+
+.ins-badge {
+  background: #2196f3;
+  color: white;
+  border: 1px solid #1976d2;
 }

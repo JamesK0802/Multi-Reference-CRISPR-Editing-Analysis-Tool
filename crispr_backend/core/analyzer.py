@@ -1,49 +1,64 @@
-import difflib
-
-def compare_windows(ref_window, read_window):
+def classify_mutation_with_alignment(ref_seq, read_seq):
     """
-    Compares the reference window and read window.
-    Returns True if they are perfectly identical.
+    CRISPRnano-standard mutation classification using exact alignment lengths.
+    Calculates net_indel = insertion_length - deletion_length across all events.
+    Returns: (category, has_sub, net_indel, tokens)
     """
-    return ref_window == read_window
-
-def classify_mutation(ref_window, read_window):
-    """
-    Classification of the read window using difflib.
-    Returns: wildtype, substitution, insertion, deletion, mixed
-    """
-    if compare_windows(ref_window, read_window):
-        print("[DEBUG] Read classified as wildtype")
-        return "wildtype"
-        
-    # SequenceMatcher finds the differences between current read and reference
-    matcher = difflib.SequenceMatcher(None, ref_window, read_window)
-    opcodes = matcher.get_opcodes()
+    tokens = align_read_to_ref(ref_seq, read_seq)
     
-    # Check what kind of string operations were found ('insert', 'delete', 'replace', or 'equal')
-    has_insert = any(tag == 'insert' for tag, i1, i2, j1, j2 in opcodes)
-    has_delete = any(tag == 'delete' for tag, i1, i2, j1, j2 in opcodes)
-    has_replace = any(tag == 'replace' for tag, i1, i2, j1, j2 in opcodes)
+    ins_len = sum(len(t["val"]) for t in tokens if t["type"] == "insert")
+    del_len = sum(len(t["val"]) for t in tokens if t["type"] == "delete")
+    sub_count = sum(len(t["val"]) for t in tokens if t["type"] == "substitute")
     
-    # Track types specifically for logging
-    detected_types = []
-    if has_insert: detected_types.append("insertion")
-    if has_delete: detected_types.append("deletion")
-    if has_replace: detected_types.append("substitution")
-
-    # Final Classification Logic
-    if len(detected_types) > 1:
-        result = "mixed"
-    elif has_insert:
-        result = "insertion"
-        print("[DEBUG] Indel detected: Insertion")
-    elif has_delete:
-        result = "deletion"
-        print("[DEBUG] Indel detected: Deletion")
-    elif has_replace:
-        result = "substitution"
+    net_indel = ins_len - del_len
+    has_sub = (sub_count > 0)
+    
+    if ins_len == 0 and del_len == 0:
+        category = "no_indel"
     else:
-        result = "wildtype" # Fallback
+        if net_indel % 3 == 0:
+            category = "in_frame"
+        else:
+            category = "out_of_frame"
+            
+    return category, has_sub, net_indel, tokens
 
-    print(f"[DEBUG] Read classified as {result} ({', '.join(detected_types)})")
-    return result
+from difflib import SequenceMatcher
+
+def align_read_to_ref(ref_seq, read_seq):
+    """
+    Creates an array of alignment tokens for frontend rendering.
+    Each token represents a block or a single character matching the reference,
+    so the frontend can render it monospaced perfectly aligned to the reference.
+    """
+    matcher = SequenceMatcher(None, ref_seq, read_seq)
+    tokens = []
+    
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == 'equal':
+            tokens.append({"type": "equal", "val": read_seq[j1:j2]})
+        elif tag == 'replace':
+            ref_chunk = ref_seq[i1:i2]
+            read_chunk = read_seq[j1:j2]
+            
+            # Normalize complex replacements into 1:1 substitutions + trailing indels
+            # SequenceMatcher replaces a block with a block, which might not be equal length.
+            for idx in range(max(len(ref_chunk), len(read_chunk))):
+                if idx < len(ref_chunk) and idx < len(read_chunk):
+                    # 1:1 substitution
+                    tokens.append({"type": "substitute", "val": read_chunk[idx]})
+                elif idx < len(ref_chunk):
+                    # Read is shorter -> gap in read
+                    tokens.append({"type": "delete", "val": "-"})
+                else:
+                    # Read is longer -> insertion in read
+                    # This insert belongs to the current "position" between reference bases
+                    tokens.append({"type": "insert", "val": read_chunk[idx]})
+        elif tag == 'delete':
+            # read is missing these bases (gap)
+            tokens.append({"type": "delete", "val": "-" * (i2 - i1)})
+        elif tag == 'insert':
+            # read has extra bases
+            tokens.append({"type": "insert", "val": read_seq[j1:j2]})
+            
+    return tokens
