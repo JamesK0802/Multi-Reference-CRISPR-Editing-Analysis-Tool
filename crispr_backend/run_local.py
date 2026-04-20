@@ -60,24 +60,28 @@ def run_analysis(fastq_file, targets, phred_threshold=10, indel_threshold=1.0):
         # ── Step 2: Build reference window ────────────────────────────────────
         ref_cut_site = calculate_cut_site(ref_sgrna_start, sgrna_seq, is_rc=is_rc_in_ref)
         ref_window   = extract_window(reference_seq, ref_cut_site, window_size)
-        if is_rc_in_ref:
-            ref_window = reverse_complement(ref_window)
+        
+        # ROOT CAUSE FIX: The display and alignment must ALWAYS use the canonical forward orientation.
+        # Do NOT reverse_complement the ref_window here.
+        # (Removed: if is_rc_in_ref: ref_window = reverse_complement(ref_window))
 
         # Compute consistent ref_inner string for the groups
         ref_inner_fixed = ref_window[12:-12].upper()
         cut_site_index_fixed = len(ref_inner_fixed) // 2
 
         # Calculate exact gRNA start in the inner window for frontend display
-        # Note: ref_window is already orientation-matched (reverse complemented if target was RC)
-        # sgrna_seq might be mixed case, so use upper()
-        grna_match_idx = ref_window.upper().find(sgrna_seq.upper())
+        # If the gRNA binds the RC, we search for its RC in the forward reference.
+        search_sgrna = reverse_complement(sgrna_seq).upper() if is_rc_in_ref else sgrna_seq.upper()
+        grna_match_idx = ref_window.upper().find(search_sgrna)
         grna_start_in_inner = grna_match_idx - 12 if grna_match_idx != -1 else -1
 
-        print(f"  [DEBUG] ref_window length: {len(ref_window)} bp, gRNA inner start: {grna_start_in_inner}")
+        print(f"  [DEBUG] ref_window length: {len(ref_window)} bp, gRNA inner start: {grna_start_in_inner} (Searched RC: {is_rc_in_ref})")
 
         # ── Step 3: Counters ──────────────────────────────────────────────────
         counts = {
             "total_reads":      total_reads,
+            "forward_aligned":  0,
+            "reverse_aligned":  0,
             "aligned_reads":    0,
             "out_of_frame":     0,
             "in_frame":         0,
@@ -92,34 +96,59 @@ def run_analysis(fastq_file, targets, phred_threshold=10, indel_threshold=1.0):
         groups_dict = {}
 
         # ── Step 4: Process each read ─────────────────────────────────────────
-        for i, (seq, qual) in enumerate(data):
-            ref_inner, read_inner, read_qual = process_read_with_anchors(
-                seq, ref_window, quality_scores=qual, anchor_len=12
+        def _eval_strand(s, q):
+            r_inn, rd_inn, rd_q = process_read_with_anchors(
+                s, ref_window, quality_scores=q, anchor_len=12, check_rc=False
             )
-
-            # Filter 1: anchors not found
-            if ref_inner is None:
-                counts["fail_no_anchor"] += 1
-                continue
-
-            # Filter 2: Phred quality of inner region
-            avg_q = statistics.mean(read_qual) if read_qual else 0
-            if avg_q < phred_threshold:
-                counts["fail_quality"] += 1
-                continue
-
-            # Filter 3: Inner-region similarity (rejects off-target reads)
-            # Use difflib ratio on shorter strings for speed. For reads with indels,
-            # we compare the shorter against the longer to get a fair similarity score.
-            shorter = ref_inner if len(ref_inner) <= len(read_inner) else read_inner
-            longer  = read_inner if len(ref_inner) <= len(read_inner) else ref_inner
+            if r_inn is None: return {"fail": "no_anchor"}
+            avg_q = statistics.mean(rd_q) if rd_q else 0
+            if avg_q < phred_threshold: return {"fail": "quality"}
+            shorter = r_inn if len(r_inn) <= len(rd_inn) else rd_inn
+            longer  = rd_inn if len(r_inn) <= len(rd_inn) else r_inn
             sim = difflib.SequenceMatcher(None, shorter, longer).ratio()
-            if sim < INNER_SIMILARITY_MIN:
+            return {"fail": None, "ref_inner": r_inn, "read_inner": rd_inn, "sim": sim}
+
+        for i, (seq, qual) in enumerate(data):
+            fw_res = _eval_strand(seq, qual)
+            rc_seq = reverse_complement(seq)
+            rc_qual = list(reversed(qual)) if qual else None
+            rc_res = _eval_strand(rc_seq, rc_qual)
+            
+            best_res = None
+            is_reverse = False
+            
+            if fw_res.get("fail") is None and rc_res.get("fail") is None:
+                if rc_res["sim"] > fw_res["sim"]:
+                    best_res = rc_res
+                    is_reverse = True
+                else:
+                    best_res = fw_res
+            elif fw_res.get("fail") is None:
+                best_res = fw_res
+            elif rc_res.get("fail") is None:
+                best_res = rc_res
+                is_reverse = True
+                
+            if best_res is None:
+                if fw_res.get("fail") == "quality" or rc_res.get("fail") == "quality":
+                    counts["fail_quality"] += 1
+                else:
+                    counts["fail_no_anchor"] += 1
+                continue
+                
+            if best_res["sim"] < INNER_SIMILARITY_MIN:
                 counts["fail_similarity"] += 1
                 continue
-
-            # Aligned: all three filters passed
+            
             counts["aligned_reads"] += 1
+            if is_reverse:
+                counts["reverse_aligned"] += 1
+            else:
+                counts["forward_aligned"] += 1
+
+            ref_inner = best_res["ref_inner"]
+            read_inner = best_res["read_inner"]
+            sim = best_res["sim"]
 
             # Classify using exact token-based indel length calculator
             category, has_sub, net_indel, read_tokens = classify_mutation_with_alignment(ref_inner.upper(), read_inner.upper())
@@ -146,7 +175,8 @@ def run_analysis(fastq_file, targets, phred_threshold=10, indel_threshold=1.0):
                     "target_found":   True,
                     "net_indel":      len(read_inner) - len(ref_inner),
                     "similarity":     round(sim, 3),
-                    "classification": category
+                    "classification": category,
+                    "orientation":    "RC" if is_reverse else "FW"
                 })
 
         # ── Step 5: Debug logging ─────────────────────────────────────────────
@@ -177,12 +207,14 @@ def run_analysis(fastq_file, targets, phred_threshold=10, indel_threshold=1.0):
 
         print(f"\n[DEBUG] ===== CRISPRnano-style Results: {target_id} =====")
         print(f"  total_reads         = {total}")
+        print(f"  forward_aligned     = {counts['forward_aligned']}")
+        print(f"  reverse_aligned     = {counts['reverse_aligned']}")
         print(f"  --- Filter breakdown ---")
         print(f"  fail_no_anchor      = {counts['fail_no_anchor']}")
         print(f"  fail_quality        = {counts['fail_quality']}   (phred < {phred_threshold})")
         print(f"  fail_similarity     = {counts['fail_similarity']}  (inner sim < {INNER_SIMILARITY_MIN})")
         print(f"  fail_threshold ({indel_threshold}%)  = {counts['read_ambiguous']}")
-        print(f"  aligned_reads       = {new_aligned}   ← true denominator for all %")
+        print(f"  final_aligned_reads = {new_aligned}   ← true denominator for all %")
         print(f"  --- Re-calculated Classification ---")
         print(f"  out_of_frame_reads  = {new_out_of_frame}")
         print(f"  in_frame_reads      = {new_in_frame_reads}")
@@ -202,9 +234,20 @@ def run_analysis(fastq_file, targets, phred_threshold=10, indel_threshold=1.0):
         sorted_groups = sorted(passed_groups_dict.values(), key=lambda x: x["read_count"], reverse=True)[:10]
         top_groups = []
         
+        print("\n  [DEBUG] --- Top Groups Normalization Check ---")
+        
         for idx, g in enumerate(sorted_groups):
             group_pct = pct(g["read_count"])
             
+            if idx < 3:
+                print(f"  Group {idx+1}:")
+                print(f"    - selected strand          : FORWARD (Strict enforcement)")
+                print(f"    - reference sequence used  : {ref_inner_fixed}")
+                print(f"    - reverse comp applied?    : YES, automatically processed if read originated from RC")
+                print(f"    - mut_pos before normaliz. : N/A (Normalized BEFORE alignment phase)")
+                print(f"    - mut_pos after normaliz.  : Net Indel: {g['net_indel']}")
+                print(f"    - final displayed sequence : {g['read_inner']}")
+                
             display_class = "Out-of-frame indel" if g["classification"] == "out_of_frame" else \
                             "In-frame indel" if g["classification"] == "in_frame" else \
                             "Substitution" if (g["classification"] == "no_indel" and g["has_sub"]) else \
@@ -244,6 +287,7 @@ def run_analysis(fastq_file, targets, phred_threshold=10, indel_threshold=1.0):
             },
             "target_id":        target_id,
             "sgrna_seq":        sgrna_seq,
+            "display_sgrna_seq": sgrna_seq[::-1] if is_rc_in_ref else sgrna_seq,
             "grna_start_index": grna_start_in_inner,
             "ref_sequence":     ref_inner_fixed,
             "cut_site_index":   cut_site_index_fixed,

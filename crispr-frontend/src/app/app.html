@@ -82,60 +82,91 @@
       </div>
     </div>
     
-    <!-- Reference Line -->
-    <div class="seq-group ref-group">
-      <div class="seq-label-col">
-        <span class="seq-label">REFERENCE 5'->3'</span>
-      </div>
+    <!-- Unified Annotation Container -->
+    <div class="unified-anno-container" style="overflow-x: auto; white-space: nowrap; border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 20px; background: white;">
       
-      <div class="seq-mono-container">
-        <!-- gRNA row -->
-        <div class="grna-row" *ngIf="selectedTarget.grna_start_index !== -1" [style.left]="selectedTarget.grna_start_index + 'ch'">
-          <div class="grna-boxes">
-            <span class="base-box grna-box" *ngFor="let char of (selectedTarget.sgrna_seq || '').split('')">{{ char }}</span>
-          </div>
-          <div class="cut-marker-absolute" [style.left]="(selectedTarget.cut_site_index - selectedTarget.grna_start_index) + 'ch'">▼</div>
-        </div>
-        
-        <div class="seq-mono ref-seq">
-          <ng-container *ngFor="let char of (selectedTarget.ref_sequence || '').split('')">
-            <span class="base-box text-box">{{ char }}</span>
-          </ng-container>
-        </div>
-      </div>
-    </div>
+      <div class="unified-table" style="display: inline-flex; flex-direction: column; min-width: min-content; width: 100%;">
 
-    <!-- Groups Loop -->
-    <div class="seq-group" *ngFor="let group of selectedTarget.top_groups">
-      <div class="seq-label-col">
-        <span class="seq-label">GROUP {{ group.group_rank }}</span>
-      </div>
-      
-      <div class="seq-mono-container">
-        <div class="seq-mono read-seq">
-          <ng-container *ngFor="let t of group.tokens">
-            <!-- If equal, split into individual characters -->
-            <ng-container *ngIf="t.type === 'equal'">
-              <span class="base-box text-box" *ngFor="let char of t.val.split('')">{{ char }}</span>
-            </ng-container>
+        <!-- Header / Reference Row -->
+        <div class="unified-row" style="display: flex; align-items: stretch; border-bottom: 2px solid #f1f2f6; position: relative;">
+          
+          <!-- STICKY LEFT LABEL -->
+          <div class="sticky-left" style="position: sticky; left: 0; background: white; z-index: 20; padding: 15px; width: 150px; box-sizing: border-box; flex-shrink: 0; border-right: 1px solid #eee; display: flex; align-items: center; font-weight: 700; font-size: 11px;">
+            REFERENCE 5'->3'
+          </div>
+          
+          <!-- SCROLLABLE CENTER SEQUENCE -->
+          <div class="seq-center" style="padding: 10px 15px 5px 15px; position: relative; z-index: 10; display: flex; flex-direction: column;">
             
-            <ng-container *ngIf="t.type === 'substitute'">
-              <span class="base-box sub-bg" *ngFor="let char of t.val.split('')">{{ char }}</span>
-            </ng-container>
+            <!-- gRNA and cut site track -->
+            <div class="grna-track" style="position: relative; height: 30px; width: 100%; display: flex; align-items: flex-end;" *ngIf="selectedTarget.grna_start_index !== -1">
+              <!-- gRNA sequence text reversed and fixed width -->
+              <div style="position: absolute; display: flex; bottom: 2px; border-bottom: 2px solid #34495e;"
+                   [style.left.px]="selectedTarget.grna_start_index * 13">
+                <span class="base-box" *ngFor="let char of (selectedTarget.display_sgrna_seq || selectedTarget.sgrna_seq || '').split('')"
+                      style="font-size: 11px; font-weight: 800; color: #34495e; font-family: monospace;">{{ char }}</span>
+              </div>
+              <!-- Cut scissors marker -->
+              <div style="position: absolute; font-size: 18px; bottom: -12px; color: #2c3e50; line-height: 1; z-index: 25;"
+                   [style.left.px]="selectedTarget.cut_site_index * 13 - 9">✂</div>
+            </div>
             
-            <ng-container *ngIf="t.type === 'delete'">
-              <span class="base-box del-bg" *ngFor="let char of t.val.split('')">-</span>
-            </ng-container>
-            
-            <span *ngIf="t.type === 'insert'" class="ins-wrapper" [attr.data-ins]="t.val"></span>
-          </ng-container>
+            <!-- Reference internal bases -->
+            <div class="seq-mono ref-seq" style="display: flex; height: 16px;">
+              <span class="base-box text-box" *ngFor="let char of (selectedTarget.ref_sequence || '').split(''); let i = index"
+                    [style.color]="(selectedTarget.grna_start_index !== -1 && i >= selectedTarget.grna_start_index && i < selectedTarget.grna_start_index + (selectedTarget.sgrna_seq?.length || 0)) ? '#3498db' : '#333'"
+                    [style.font-weight]="(selectedTarget.grna_start_index !== -1 && i >= selectedTarget.grna_start_index && i < selectedTarget.grna_start_index + (selectedTarget.sgrna_seq?.length || 0)) ? 'bold' : 'normal'">
+                {{ char }}
+              </span>
+            </div>
+          </div>
+          
+          <!-- STICKY RIGHT STATS -->
+          <div class="sticky-right" style="position: sticky; right: 0; background: white; z-index: 20; padding: 15px; width: 300px; box-sizing: border-box; flex-shrink: 0; border-left: 1px solid #eee;">
+          </div>
+          
         </div>
-      </div>
-      
-      <div class="seq-stats">
-        <strong>TYPE: {{ group.classification }}{{ group.net_indel ? ' ('+group.net_indel+' bp)' : ' (0 bp)' }}</strong>
-        <br>
-        <span class="stats-detail">| {{ group.read_count | number }} Reads, {{ group.read_pct }} %</span>
+
+        <!-- Groups Rows -->
+        <div class="unified-row" *ngFor="let group of selectedTarget.top_groups" 
+             style="display: flex; align-items: stretch; border-bottom: 1px dotted #e0e0e0; background: white;">
+          
+          <!-- STICKY LEFT LABEL -->
+          <div class="sticky-left" style="position: sticky; left: 0; background: inherit; z-index: 15; padding: 10px 15px; width: 150px; box-sizing: border-box; flex-shrink: 0; border-right: 1px solid #eee; display: flex; align-items: center; font-weight: 700; font-size: 11px;">
+            GROUP {{ group.group_rank }}
+          </div>
+          
+          <!-- SCROLLABLE CENTER SEQUENCE -->
+          <div class="seq-center" style="padding: 10px 15px 23px 15px; display: flex; align-items: flex-start; position: relative;">
+            <div class="seq-mono read-seq" style="display: flex; height: 16px;">
+              <ng-container *ngFor="let t of group.tokens">
+                <ng-container *ngIf="t.type === 'equal'">
+                  <span class="base-box text-box" *ngFor="let char of t.val.split('')"
+                        [style.color]="'#333'">{{ char }}</span>
+                </ng-container>
+                
+                <ng-container *ngIf="t.type === 'substitute'">
+                  <span class="base-box sub-bg" *ngFor="let char of t.val.split('')">{{ char }}</span>
+                </ng-container>
+                
+                <ng-container *ngIf="t.type === 'delete'">
+                  <span class="base-box del-bg" *ngFor="let char of t.val.split('')">-</span>
+                </ng-container>
+                
+                <span *ngIf="t.type === 'insert'" class="ins-wrapper" [attr.data-ins]="t.val"></span>
+              </ng-container>
+            </div>
+          </div>
+          
+          <!-- STICKY RIGHT STATS -->
+          <div class="sticky-right" style="position: sticky; right: 0; background: inherit; z-index: 15; padding: 10px 15px; width: 300px; box-sizing: border-box; flex-shrink: 0; border-left: 1px solid #eee; display: flex; align-items: center; font-size: 11px;">
+            <div style="line-height: 1.4;">
+              <strong>TYPE: {{ group.classification }}{{ group.net_indel ? ' ('+group.net_indel+' bp)' : ' (0 bp)' }}</strong><br>
+              <span style="color: #7f8c8d;">| {{ group.read_count | number }} Reads, {{ group.read_pct }} %</span>
+            </div>
+          </div>
+          
+        </div>
       </div>
     </div>
   </div>

@@ -47,7 +47,7 @@ def extract_window(sequence, cut_site, window_size, quality_scores=None):
     return seq_win
 
 
-def process_read_with_anchors(read_seq, ref_window, quality_scores=None, anchor_len=12):
+def process_read_with_anchors(read_seq, ref_window, quality_scores=None, anchor_len=12, check_rc=True):
     """
     CRISPRnano-compatible indel detection via flanking anchor sequences.
 
@@ -64,6 +64,7 @@ def process_read_with_anchors(read_seq, ref_window, quality_scores=None, anchor_
         ref_window:     fixed reference window (str), e.g. 90 bp centered on cut site
         quality_scores: per-base Phred scores (list[int]) from BioPython parser, or None
         anchor_len:     bases taken from each end of ref_window as search anchors
+        check_rc:       if True, automatically checks reverse complement if forward fails
 
     Returns:
         (ref_inner, read_inner, qual_inner)
@@ -95,7 +96,7 @@ def process_read_with_anchors(read_seq, ref_window, quality_scores=None, anchor_
 
     # Try forward orientation
     result = _find_anchored(read_seq, quality_scores)
-    if result[0] is not None:
+    if result[0] is not None or not check_rc:
         return result
 
     # Try reverse complement

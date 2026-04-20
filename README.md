@@ -39,14 +39,16 @@ The CRISPR Editing Analysis Tool is a robust, local pipeline designed to quantif
 
 ## Key Features
 
-- **Orientation-Aware Alignment**: Automatically detects if a gRNA is forward or reverse-complement in the reference. Features bi-directional read search to maximize alignment rates for real-world sequencing data.
-- **Detailed Mutation Classification**: Precisely categorizes every read into `Wildtype`, `Substitution`, `Insertion`, `Deletion`, or `Mixed` mutations.
-- **Standardized Stats**: Calculates Indel and Substitution rates using **Aligned Reads** as the denominator, ensuring biological accuracy.
+- **Canonical Strand Normalization**: Enforces forward-strand normalization for all analysis metrics and visualizations. Even if gRNA binds to the reverse strand, mutation positions and cut sites are mapped back to the canonical reference coordinate system.
+- **Bi-Directional Read Search**: Implements dual-strand evaluation for every read, selecting the orientation with the highest alignment score to ensure maximum data recovery without count inflation.
+- **Unified Annotation Grid**: A single, horizontally scrollable sequence viewport with **Sticky Label** (left) and **Sticky Info** (right) columns. Mutation patterns across all groups are vertically aligned for instant pattern recognition.
+- **Precise gRNA & Cut-site Mapping**: features 1:1 character-to-pixel mapping (13px base-boxes) for accurate scissor placement and gRNA target highlighting.
+- **Detailed Mutation Classification**: Precisely categorizes every read into `Wildtype`, `Substitution`, `Insertion`, `Deletion`, or `Mixed` mutations using biological frame-shift analysis.
+- **Standardized Stats**: Calculates Indel and Substitution rates using **Aligned Reads** as the denominator, achieving parity with industry standards like CRISPRnano.
 - **Interactive Dashboard**:
   - **Mutation Distribution Pie Chart**: Visualize the breakdown of editing outcomes.
   - **Edit Rate Bar Charts**: Track efficiency across multiple samples and targets.
   - **Real-time Status Log**: Decoupled communication history with manual state tracking.
-- **Resilient UI Mapping**: Optimized frontend data pipelines that handle variations in backend naming conventions (snake_case vs camelCase).
 
 ## Tech Stack
 
