@@ -62,6 +62,39 @@ export interface AnalysisResponse {
     data_type: string;
     phred_threshold: number;
     indel_threshold: number;
+    is_multi_reference?: boolean;
+    margin_threshold?: number;
   };
   results: FileResult[];
+}
+
+// ── Phase 3: Multi-Reference types ───────────────────────────────────────────
+export interface GeneResult {
+  gene: string;
+  assigned_read_count: number;
+  ambiguous_excluded: boolean;
+  analysis_result: {
+    targets: TargetResult[];
+  };
+}
+
+export interface MultiReferenceResponse {
+  genes: GeneResult[];
+  ambiguous_read_count: number;
+  debug?: {
+    total_reads_parsed: number;
+    assignment_margin_threshold_used: number;
+    genes: Array<{
+      gene: string;
+      reference_length: number;
+      assigned_reads_analyzed: number;
+      number_of_targets_analyzed: number;
+    }>;
+  };
+}
+
+// A file result in multi-ref mode wraps the above
+export interface MultiRefFileResult {
+  fastq_file: string;
+  multi_reference_result: MultiReferenceResponse;
 }

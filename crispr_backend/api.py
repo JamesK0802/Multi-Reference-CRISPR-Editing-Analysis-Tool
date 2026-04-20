@@ -9,7 +9,7 @@ import uuid
 import time
 
 # Import our perfectly separated backend logic
-from run_local import process_files
+from run_local import process_files, process_files_multi
 
 app = FastAPI(title="CRISPR Analysis API")
 
@@ -39,10 +39,12 @@ def background_analysis(
     task_id: str,
     temp_dir: str,
     file_paths: List[str],
-    target_dicts: List[dict],
+    target_payload: List[dict],
     data_type: str,
     phred_threshold: int,
-    indel_threshold: float
+    indel_threshold: float,
+    is_multi_reference: bool = False,
+    margin_threshold: float = 0.05
 ):
     print(f"[DEBUG] Background thread started for task {task_id}")
     try:
@@ -54,15 +56,25 @@ def background_analysis(
         # Immediate update to confirm the thread is alive
         update_progress(0, "Backend thread started")
 
-        # Call the core pipeline with progress callback
-        results = process_files(
-            file_paths, 
-            target_dicts,
-            data_type=data_type,
-            phred_threshold=phred_threshold,
-            indel_threshold=indel_threshold,
-            progress_callback=update_progress
-        )
+        if is_multi_reference:
+            results = process_files_multi(
+                file_paths,
+                target_payload,
+                data_type=data_type,
+                phred_threshold=phred_threshold,
+                indel_threshold=indel_threshold,
+                margin_threshold=margin_threshold,
+                progress_callback=update_progress
+            )
+        else:
+            results = process_files(
+                file_paths, 
+                target_payload,
+                data_type=data_type,
+                phred_threshold=phred_threshold,
+                indel_threshold=indel_threshold,
+                progress_callback=update_progress
+            )
         
         tasks[task_id]["progress"] = 100
         tasks[task_id]["stage"] = "Completed"
@@ -85,7 +97,9 @@ async def run_analysis_endpoint(
     interest_region: int = Form(90), # Default 90
     phred_threshold: int = Form(10), # Default 10
     indel_threshold: float = Form(1.0),
-    targets: str = Form(...)
+    targets: str = Form(...),
+    is_multi_reference: bool = Form(False),
+    assignment_margin_threshold: float = Form(0.05)
 ):
     """
     Starts the CRISPR analysis and returns a task_id for progress polling.
@@ -120,23 +134,30 @@ async def run_analysis_endpoint(
         # 2. Parse targets
         try:
             raw_targets = json.loads(targets)
-            target_dicts = []
-            for t in raw_targets:
-                target_dicts.append({
-                    "target_id": t.get("target_id"),
-                    "sgrna_seq": t.get("gRNA"),
-                    "reference_seq": t.get("reference_sequence"),
-                    "window_size": clamped_interest # Use clamped value
-                })
-            print(f"[DEBUG] Parsed {len(target_dicts)} targets.")
+            if is_multi_reference:
+                # payload is expected to be genes with targets inside
+                # e.g., [{"gene": "GeneA", "sequence": "...", "targets": [{"target_id": "T1", "sgrna_seq": "...", "window_size": 90}]}]
+                parsed_payload = raw_targets 
+                print(f"[DEBUG] Parsed multi-reference payload with {len(parsed_payload)} genes.")
+            else:
+                parsed_payload = []
+                for t in raw_targets:
+                    parsed_payload.append({
+                        "target_id": t.get("target_id"),
+                        "sgrna_seq": t.get("gRNA"),
+                        "reference_seq": t.get("reference_sequence"),
+                        "window_size": clamped_interest # Use clamped value
+                    })
+                print(f"[DEBUG] Parsed {len(parsed_payload)} targets.")
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid format for 'targets' array.")
 
         # 3. Hand off to background task
         background_tasks.add_task(
             background_analysis,
-            task_id, temp_dir, file_paths, target_dicts, 
-            data_type, phred_threshold, indel_threshold
+            task_id, temp_dir, file_paths, parsed_payload, 
+            data_type, phred_threshold, indel_threshold,
+            is_multi_reference, assignment_margin_threshold
         )
         print(f"[DEBUG] Background task added to queue.")
         

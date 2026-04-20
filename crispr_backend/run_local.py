@@ -10,9 +10,21 @@ from core.aligner import (process_read_with_anchors, extract_window,
                            calculate_cut_site, find_target_in_reference,
                            reverse_complement)
 from core.analyzer import classify_mutation_with_alignment
+from core.multi_reference_assigner import assign_reads_to_references
 
 
 def run_analysis(fastq_file, targets, phred_threshold=10, indel_threshold=1.0):
+    print(f"  [RUN_ANALYSIS] Parsing {fastq_file}...")
+    data = parse_fastq(fastq_file)
+    print(f"  [RUN_ANALYSIS] Found {len(data)} sequences.")
+
+    final_output = {
+        "fastq_file": fastq_file,
+        "target_results": run_analysis_on_reads(data, targets, phred_threshold, indel_threshold)
+    }
+    return final_output
+
+def run_analysis_on_reads(data, targets, phred_threshold=10, indel_threshold=1.0):
     """
     Main analysis pipeline — CRISPRnano-compatible.
 
@@ -30,15 +42,8 @@ def run_analysis(fastq_file, targets, phred_threshold=10, indel_threshold=1.0):
     # ── Similarity threshold for inner region (0.85 drops noisy non-target sequences) ──
     INNER_SIMILARITY_MIN = 0.85
 
-    print(f"  [RUN_ANALYSIS] Parsing {fastq_file}...")
-    data = parse_fastq(fastq_file)
     total_reads = len(data)
-    print(f"  [RUN_ANALYSIS] Found {total_reads} sequences.")
-
-    final_output = {
-        "fastq_file": fastq_file,
-        "target_results": []
-    }
+    target_results_list = []
 
     for target in targets:
         target_id     = target.get("target_id")
@@ -295,9 +300,118 @@ def run_analysis(fastq_file, targets, phred_threshold=10, indel_threshold=1.0):
             "top_groups": top_groups
         }
 
-        final_output["target_results"].append(target_result)
+        target_results_list.append(target_result)
 
-    return final_output
+    return target_results_list
+
+def run_demultiplex(fastq_file, references, margin_threshold=0.05):
+    """
+    Phase 1: Multi-reference read assignment (demultiplexing).
+    Assigns each read to the most likely reference gene based on alignment scores.
+    """
+    print(f"  [RUN_DEMULTIPLEX] Parsing {fastq_file}...")
+    data = parse_fastq(fastq_file)
+    print(f"  [RUN_DEMULTIPLEX] Found {len(data)} sequences.")
+
+    result = assign_reads_to_references(data, references, margin_threshold)
+
+    return {
+        "fastq_file": fastq_file,
+        "demultiplex_result": result
+    }
+
+def run_multi_reference_analysis(fastq_file, genes_payload, assignment_margin_threshold=0.05, phred_threshold=10, indel_threshold=1.0):
+    """
+    Phase 2: Multi-reference assignment + per-gene CRISPR analysis.
+    
+    genes_payload format:
+    [
+        {
+            "gene": "GeneA",
+            "sequence": "ACTG...", # Full reference for demultiplexing
+            "targets": [
+                {
+                    "target_id": "Target1",
+                    "sgrna_seq": "...",
+                    "window_size": 90,
+                    # reference_seq is auto-filled from the gene's sequence
+                }
+            ]
+        }, ...
+    ]
+    """
+    print(f"  [MULTI_REF_ANALYSIS] Parsing {fastq_file}...")
+    data = parse_fastq(fastq_file)
+    total_reads_initial = len(data)
+    print(f"  [MULTI_REF_ANALYSIS] Total reads: {total_reads_initial}")
+    
+    demux_references = [
+        {
+            "gene": g["gene"],
+            "sequence": g["sequence"]
+        } for g in genes_payload
+    ]
+    
+    print(f"  [MULTI_REF_ANALYSIS] Demultiplexing with margin={assignment_margin_threshold}...")
+    demux_result = assign_reads_to_references(data, demux_references, assignment_margin_threshold)
+    
+    ambiguous_reads_count = len(demux_result["ambiguous_reads"])
+    print(f"  [MULTI_REF_ANALYSIS] Ambiguous reads: {ambiguous_reads_count}")
+    
+    output = {
+        "genes": [],
+        "ambiguous_read_count": ambiguous_reads_count,
+        "debug": {
+            "total_reads_parsed": total_reads_initial,
+            "assignment_margin_threshold_used": assignment_margin_threshold,
+            "genes": []
+        }
+    }
+    
+    # Run analysis for each gene bucket
+    for gene_bucket in demux_result["genes"]:
+        gene_name = gene_bucket["gene"]
+        assigned_reads_info = gene_bucket["assigned_reads"]
+        
+        # Find corresponding gene payload to get targets
+        gene_payload = next((g for g in genes_payload if g["gene"] == gene_name), None)
+        if not gene_payload:
+            continue
+            
+        targets = gene_payload.get("targets", [])
+        
+        # Auto-fill reference_seq for targets if missing, using the gene's sequence
+        for t in targets:
+            if "reference_seq" not in t or not t["reference_seq"]:
+                t["reference_seq"] = gene_payload["sequence"]
+                
+        # Reconstruct exactly the (seq, qual) tuples for analysis
+        # assigned_reads_info contains {"seq": ..., "qual": ...}
+        gene_reads_data = [(r["seq"], r["qual"]) for r in assigned_reads_info]
+        assigned_count = len(gene_reads_data)
+        
+        print(f"  [MULTI_REF_ANALYSIS] Gene '{gene_name}' -> assigned: {assigned_count}, analyzing targets: [ {', '.join([t.get('target_id','') for t in targets])} ]")
+        
+        analysis_result_targets = run_analysis_on_reads(gene_reads_data, targets, phred_threshold, indel_threshold)
+        
+        output["genes"].append({
+            "gene": gene_name,
+            "assigned_read_count": assigned_count,
+            "ambiguous_excluded": True,
+            "analysis_result": {
+                "targets": analysis_result_targets
+            }
+        })
+        
+        output["debug"]["genes"].append({
+            "gene": gene_name,
+            "reference_length": len(gene_payload["sequence"]),
+            "assigned_reads_analyzed": assigned_count,
+            "number_of_targets_analyzed": len(targets)
+        })
+        
+    print(f"  [MULTI_REF_ANALYSIS] Returning multi-reference results grouped by gene.")
+    return output
 
 def process_files(file_paths, targets, data_type="single-end", phred_threshold=30, indel_threshold=1.0, progress_callback=None):
     """
@@ -329,6 +443,128 @@ def process_files(file_paths, targets, data_type="single-end", phred_threshold=3
     if progress_callback:
         progress_callback(95, "Finalizing")
             
+    return final_payload
+
+def process_files_multi(file_paths, genes_payload, data_type="single-end", phred_threshold=30, indel_threshold=1.0, margin_threshold=0.05, progress_callback=None):
+    """
+    Processes file paths for multi-reference analysis with fine-grained progress.
+    Emits file / demux / gene / target level progress events.
+    """
+    print(f"[PROCESS_FILES_MULTI] Starting multi-reference analysis of {len(file_paths)} files.")
+
+    total_files = len(file_paths)
+    total_genes = len(genes_payload)
+
+    if progress_callback:
+        progress_callback(5, f"Starting - {total_files} file(s), {total_genes} gene(s)")
+
+    final_payload = {
+        "metadata": {
+            "data_type": data_type,
+            "phred_threshold": phred_threshold,
+            "indel_threshold": indel_threshold,
+            "margin_threshold": margin_threshold,
+            "is_multi_reference": True
+        },
+        "results": []
+    }
+
+    # 10-95 range spread across all files
+    file_range = 85.0 / max(total_files, 1)
+
+    for fi, filepath in enumerate(file_paths):
+        if not os.path.exists(filepath):
+            continue
+
+        file_base = 10.0 + fi * file_range
+        file_name = os.path.basename(filepath)
+
+        if progress_callback:
+            progress_callback(int(file_base),
+                              f"Parsing {file_name} (file {fi+1}/{total_files})")
+
+        # Parse FASTQ
+        from core.parser import parse_fastq
+        data = parse_fastq(filepath)
+        total_reads = len(data)
+
+        if progress_callback:
+            progress_callback(int(file_base + file_range * 0.10),
+                              f"Assigning {total_reads:,} reads to {total_genes} genes (file {fi+1}/{total_files})")
+
+        # Demultiplex
+        from core.multi_reference_assigner import assign_reads_to_references
+        demux_refs = [{"gene": g["gene"], "sequence": g["sequence"]} for g in genes_payload]
+        demux_result = assign_reads_to_references(data, demux_refs, margin_threshold)
+        ambiguous_count = len(demux_result["ambiguous_reads"])
+
+        if progress_callback:
+            progress_callback(int(file_base + file_range * 0.20),
+                              f"Demux complete - {ambiguous_count:,} ambiguous (file {fi+1}/{total_files})")
+
+        # Per-gene analysis
+        gene_range = file_range * 0.70 / max(total_genes, 1)
+        gene_output = {
+            "genes": [],
+            "ambiguous_read_count": ambiguous_count,
+            "debug": {
+                "total_reads_parsed": total_reads,
+                "assignment_margin_threshold_used": margin_threshold,
+                "genes": []
+            }
+        }
+
+        for gi, gene_bucket in enumerate(demux_result["genes"]):
+            gene_name  = gene_bucket["gene"]
+            gene_reads = [(r["seq"], r["qual"]) for r in gene_bucket["assigned_reads"]]
+            gene_payload = next((g for g in genes_payload if g["gene"] == gene_name), None)
+            if not gene_payload:
+                continue
+
+            targets_for_gene = gene_payload.get("targets", [])
+            total_targets    = len(targets_for_gene)
+            gene_pct_base    = file_base + file_range * 0.20 + gi * gene_range
+
+            if progress_callback:
+                progress_callback(int(gene_pct_base),
+                                  f"Gene {gi+1}/{total_genes}: {gene_name} - {len(gene_reads):,} reads (file {fi+1}/{total_files})")
+
+            for t in targets_for_gene:
+                if not t.get("reference_seq"):
+                    t["reference_seq"] = gene_payload["sequence"]
+
+            target_range = gene_range / max(total_targets, 1)
+            target_results = []
+            for ti, target in enumerate(targets_for_gene):
+                if progress_callback:
+                    progress_callback(
+                        int(gene_pct_base + ti * target_range),
+                        f"Gene {gi+1}/{total_genes} ({gene_name}) | Target {ti+1}/{total_targets}: {target.get('target_id', '?')} (file {fi+1}/{total_files})"
+                    )
+                single = run_analysis_on_reads(gene_reads, [target], phred_threshold, indel_threshold)
+                target_results.extend(single)
+
+            gene_output["genes"].append({
+                "gene": gene_name,
+                "assigned_read_count": len(gene_reads),
+                "ambiguous_excluded": True,
+                "analysis_result": {"targets": target_results}
+            })
+            gene_output["debug"]["genes"].append({
+                "gene": gene_name,
+                "reference_length": len(gene_payload["sequence"]),
+                "assigned_reads_analyzed": len(gene_reads),
+                "number_of_targets_analyzed": total_targets
+            })
+
+        final_payload["results"].append({
+            "fastq_file": filepath,
+            "multi_reference_result": gene_output
+        })
+
+    if progress_callback:
+        progress_callback(95, "Building results...")
+
     return final_payload
 
 def main():

@@ -15,115 +15,90 @@
 - 조각을 잃어버리거나 (**결실**)
 - 엉뚱한 조각으로 갈아끼우거나 (**치환**)
 
-이 프로그램은 수억 개의 DNA 조각들을 슈퍼 컴퓨터처럼 빠르게 살펴보고, **"가위가 정확히 어디를 잘랐는지"** 그리고 **"세포가 고칠 때 어떤 실수를 얼마나 많이 했는지"**를 한눈에 보여주는 똑똑한 돋보기예요.
+이 프로그램은 수억 개의 DNA 조각들을 슈퍼 컴퓨터처럼 빠르게 살펴보고, **"가위가 정확히 어디를 잘랐는지"** 그리고 **"세포가 고칠 때 어떤 실수를 얼마나 많이 했는지"**를 한눈에 보여주는 똑똑한 돋보기예요. 특히, **여러 유전자가 섞인 파일**에서도 어떤 조각이 어떤 유전자인지 척척 찾아내어 따로따로 분석할 수 있답니다!
 
 ---
 
 #### 3. 설정값(Parameter)은 무슨 뜻인가요?
-*   **Interest region (관심 영역)**: 사고가 난 지점(가위로 자른 곳) 주변을 얼마나 넓게 살펴볼지를 정하는 거예요. 사고 현장 바로 앞만 볼지, 동네 한 바퀴를 다 볼지를 결정해요. 보통 **90bp** 정도면 사고 현장을 충분히 파악할 수 있어요!
-*   **Phred Threshold (품질 점수)**: 사진기가 흔들려서 찍힌 흐릿한 사진은 믿을 수 없겠죠? "이 정도 이상의 선명한 사진(데이터)만 분석해!"라고 기준을 정하는 거예요. 보통 **10점** 이상이면 믿을만해요.
-*   **Indel Threshold (최소 빈도)**: 수많은 실수 중에서 딱 한 번 일어난 아주 작은 실수는 단순한 기계 오류일 수도 있어요. "적어도 전체의 **1%** 이상 발생한 굵직한 사건들만 보여줘!"라고 정하는 필터예요.
-
----
-
-#### 4. 결과창의 단어들은 무엇을 의미하나요?
-*   **Out-of-frame (해독 불가)**: DNA 설계도는 '3글자'씩 끊어서 읽어야 해요. 그런데 1글자나 2글자를 잃어버리면 뒤에 있는 모든 글자가 엉망진창이 되어서 읽을 수 없게 돼요. 유전자의 기능을 완전히 끄고 싶을 때 중요하게 봐요!
-*   **In-frame (부분 변경)**: 다행히 딱 3글자(또는 6, 9글자) 단위로 글자를 잃어버리거나 얻은 거예요. 문장의 전체 뜻은 통하지만 단어 한두 개만 살짝 바뀐 상태죠.
-*   **No Indel (변화 없음)**: 가위가 작동하지 않았거나, 아주 완벽하게 다시 붙어서 원래 설계도와 똑같은 상태예요.
+*   **Interest region (관심 영역)**: 사고가 난 지점(가위로 자른 곳) 주변을 얼마나 넓게 살펴볼지를 정하는 거예요. 보통 **90bp** 정도면 충분해요!
+*   **Phred Threshold (품질 점수)**: 흐릿한 사진 대신 선명한 결과만 믿겠다는 기준이에요. 보통 **10점** 이상을 써요.
+*   **Assignment Margin (할당 여유값)**: 여러 유전자 후보 중 하나를 고를 때, 얼마나 확실해야 그 유전자로 인정할지 정하는 거예요. 값이 클수록 "정말 확실한 것"만 골라내요.
+*   **Indel Threshold (최소 빈도)**: 사소한 실수 말고, 전체의 **1%** 이상 일어난 굵직한 사건들만 보여주는 필터예요.
 
 ---
 
 ## Overview
 
-The CRISPR Editing Analysis Tool is a robust, local pipeline designed to quantify genome editing efficiency. By performing orientation-aware alignment and detailed mutation categorization, it provides researchers with highly accurate metrics for Indel frequency and mutation distribution.
+The CRISPR Editing Analysis Tool is a high-performance analysis pipeline designed to quantify genome editing efficiency. It supports both **Single-Reference** and **Multi-Reference** (demultiplexing) workflows, allowing researchers to process mixed FASTQ files containing multiple genetic loci in a single run.
 
 ## Key Features
 
-- **Canonical Strand Normalization**: Enforces forward-strand normalization for all analysis metrics and visualizations. Even if gRNA binds to the reverse strand, mutation positions and cut sites are mapped back to the canonical reference coordinate system.
-- **Bi-Directional Read Search**: Implements dual-strand evaluation for every read, selecting the orientation with the highest alignment score to ensure maximum data recovery without count inflation.
-- **Unified Annotation Grid**: A single, horizontally scrollable sequence viewport with **Sticky Label** (left) and **Sticky Info** (right) columns. Mutation patterns across all groups are vertically aligned for instant pattern recognition.
-- **Precise gRNA & Cut-site Mapping**: features 1:1 character-to-pixel mapping (13px base-boxes) for accurate scissor placement and gRNA target highlighting.
-- **Detailed Mutation Classification**: Precisely categorizes every read into `Wildtype`, `Substitution`, `Insertion`, `Deletion`, or `Mixed` mutations using biological frame-shift analysis.
-- **Standardized Stats**: Calculates Indel and Substitution rates using **Aligned Reads** as the denominator, achieving parity with industry standards like CRISPRnano.
-- **Interactive Dashboard**:
-  - **Mutation Distribution Pie Chart**: Visualize the breakdown of editing outcomes.
-  - **Edit Rate Bar Charts**: Track efficiency across multiple samples and targets.
-  - **Real-time Status Log**: Decoupled communication history with manual state tracking.
+- **🧬 Multi-Reference Demultiplexing (New)**: Automatically assigns reads to the most likely gene/reference using strand-aware alignment. Ambiguous reads are safely excluded based on a configurable **Assignment Margin**.
+- **📊 Hierarchical Gene-Target UI**: Define multiple genes, each with its own reference sequence and multiple sgRNA targets.
+- **📈 Gene-Scoped Dashboard**: Navigate through results for different genes using a clean Tab-based interface. Each tab provides independent summary cards, charts, and annotation visuals.
+- **⚡ Fine-Grained Progress System**: Real-time, smooth progress bar that tracks the exact stage of analysis:
+  - FASTQ Parsing -> Read Assignment -> Per-Gene Analysis -> Per-Target Classification.
+- **🔍 Unified Annotation Grid**: Horizontally scrollable sequence viewport with vertical alignment for mutation patterns across all groups.
+- **📍 Precise Coordinate Mapping**: 1:1 character-to-pixel mapping for gRNA highlighting and cut-site (scissors) markers.
+- **📐 Canonical Normalization**: Automatically normalizes all metrics to the forward direction of the reference, regardless of gRNA strand orientation.
 
 ## Tech Stack
 
-- **Backend**: Python 3.9+, [FastAPI](https://fastapi.tiangolo.com/), [Biopython](https://biopython.org/), [Pydantic](https://docs.pydantic.dev/)
-- **Frontend**: [Angular 21](https://angular.dev/), [Chart.js](https://www.chartjs.org/)
-- **Future Integration**: Ollama + Gemma (for LLM-based sequence interpretation)
+- **Backend**: Python 3.9+, [FastAPI](https://fastapi.tiangolo.com/), [Biopython](https://biopython.org/)
+- **Frontend**: [Angular 21](https://angular.dev/), [Reactive Forms](https://angular.io/guide/reactive-forms), [Chart.js](https://www.chartjs.org/)
+- **Core Engine**: Custom demultiplexing logic + Needle-style alignment wrapper.
 
 ## Project Structure
 
 ```bash
-├── crispr_backend/     # FastAPI Backend
-│   ├── core/           # Analysis logic (Parser, Aligner, Analyzer)
-│   ├── api.py          # API Endpoint definitions
-│   ├── run_local.py    # CLI entry point and orchestration
-│   └── requirements.txt
-└── crispr-frontend/    # Angular Frontend
-    ├── src/app/        # Dashboard and Analysis Service
-    ├── package.json
-    └── ...
+├── crispr_backend/
+│   ├── core/
+│   │   ├── multi_reference_assigner.py  # Read demultiplexing logic
+│   │   ├── aligner.py                   # Strand-aware alignment
+│   │   ├── analyzer.py                  # Mutation classification
+│   │   └── parser.py                    # FASTQ parsing
+│   ├── api.py          # REST API & WebSocket-style status
+│   └── run_local.py    # Main orchestration pipeline
+└── crispr-frontend/
+    ├── src/app/
+    │   ├── app.ts      # State management & payload transformation
+    │   ├── app.html    # Hierarchical input & Tabbed results
+    │   └── models/     # Multi-reference data models
 ```
 
-## Installation & Setup
+## Installation & setup
 
-### Backend
-1. Navigate to the backend directory:
-   ```bash
-   cd crispr_backend
-   ```
-2. Create and activate a virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # Mac/Linux
-   ```
-3. Install dependencies (Requires Biopython):
-   ```bash
-   pip install fastapi uvicorn biopython python-multipart
-   ```
+### 1. Backend
+```bash
+cd crispr_backend
+python -m venv venv
+source venv/bin/activate
+pip install fastapi uvicorn biopython python-multipart
+```
 
-### Frontend
-1. Navigate to the frontend directory:
-   ```bash
-   cd crispr-frontend
-   ```
-2. Install Node dependencies:
-   ```bash
-   npm install
-   ```
+### 2. Frontend
+```bash
+cd crispr-frontend
+npm install
+```
 
-## How to Run Locally
+## Running the Tool
 
-1. **Start Backend**:
-   ```bash
-   cd crispr_backend
-   source venv/bin/activate
-   uvicorn api:app --reload --port 8000
-   ```
-   - **Main URL**: `http://localhost:8000`
-   - **Swagger UI**: `http://localhost:8000/docs`
+1.  **Start Backend**: `uvicorn api:app --reload --port 8000` (in `crispr_backend`)
+2.  **Start Frontend**: `npx ng serve` (in `crispr-frontend`)
+3.  Open `http://localhost:4200`
 
-2. **Start Frontend**:
-   ```bash
-   cd crispr-frontend
-   npx ng serve
-   ```
+## Multi-Reference Analysis Guide
 
-3. Open your browser to `http://localhost:4200`.
-
-## Example Usage
-
-1. **Upload Files**: Drag and drop `.fastq` or `.fq` files.
-2. **Define Targets**: Provide target IDs and reference sequences. The system will auto-detect the gRNA orientation.
-3. **Analyze**: Click **Run Analysis**. The results section will automatically appear at the top once the first target is processed.
-4. **Inspect**: Use the Pie Chart to see the mutation types and the detailed table for per-sample metrics.
+1.  **Toggle Mode**: Click the **🧬 Multi-Gene OFF** button to toggle it to **ON**.
+2.  **Add Genes**: For each gene locus in your mixed FASTQ:
+    - Enter the **Gene Name** and **Full Reference Sequence**.
+    - Add one or more **Targets (gRNAs)** nested inside that gene.
+3.  **Set Margin**: Adjust **Assignment Margin** (default 0.05). Higher values make read assignment more conservative.
+4.  **Upload**: Select one or more `.fastq` files.
+5.  **Analyze**: Watch the live progress status display the exact file, gene, and target being processed!
 
 ## AI Usage Disclaimer
 
 > [!NOTE]
-> This project was developed with the assistance of AI coding agents. While AI contributed to logic implementations and dashboard styling, the architectural pivots (such as the orientation-aware alignment engine) were guided and verified by the developer to ensure scientific correctness.
+> This project was developed with the assistance of AI coding agents. The sophisticated multi-reference demultiplexing architecture and the hierarchical UI state management were evolved through agentic pair-programming to ensure high-quality, scientifically sound results.
