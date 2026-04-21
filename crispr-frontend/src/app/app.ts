@@ -2,7 +2,8 @@ import { Component, OnInit, OnDestroy, ChangeDetectorRef, NgZone } from '@angula
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, FormArray, Validators } from '@angular/forms';
 import { AnalysisService, TaskStatus } from './services/analysis.service';
-import { AnalysisResponse, AnalysisBreakdown, GeneResult, MultiReferenceResponse } from './models/analysis.model';
+import { AnalysisResponse, AnalysisBreakdown, GeneResult, MultiReferenceResponse,
+         BenchmarkRow, BenchmarkResult, SplitPreview, SplitPreviewRow, CutSiteInfo } from './models/analysis.model';
 import { Chart } from 'chart.js/auto';
 import { Subject, timer, interval } from 'rxjs';
 import { takeUntil, switchMap } from 'rxjs/operators';
@@ -31,16 +32,18 @@ export class App implements OnInit, OnDestroy {
   isDragging = false;
 
   // ── Core state ─────────────────────────────────────────────────────────────
-  result: AnalysisResponse | null = null;
+  result: any | null = null;
   error: string | null = null;
   isLoading = false;
-  useMock = false;
 
-  // ── Multi-reference mode ───────────────────────────────────────────────────
-  isMultiReferenceMode = false;
+  // ── Mode selection ────────────────────────────────────────────────────────
   assignmentMarginThreshold = 0.05;
 
-  // Multi-reference rendering state
+  // ── View state ────────────────────────────────────────────────────────────
+  showAnalysis = true;
+  showBenchmark = false;
+
+  // Analysis result rendering state
   isMultiReference = false;
   genes: GeneResult[] = [];
   selectedGeneIndex = 0;
@@ -100,6 +103,16 @@ export class App implements OnInit, OnDestroy {
     this.cdr.detectChanges();
   }
 
+  toggleAnalysis() {
+    this.showAnalysis = !this.showAnalysis;
+    this.cdr.detectChanges();
+  }
+
+  toggleBenchmark() {
+    this.showBenchmark = !this.showBenchmark;
+    this.cdr.detectChanges();
+  }
+
   // ── Smooth progress animation ──────────────────────────────────────────────
   private setProgress(target: number, stage: string) {
     this.progress = target;
@@ -146,9 +159,8 @@ export class App implements OnInit, OnDestroy {
       interestRegion: [90, [Validators.required, Validators.min(60), Validators.max(120)]],
       phredThreshold: [10],
       indelThreshold: [1.0],
-      // Single-reference: flat targets array
-      targets: this.fb.array([this.createTargetGroup()]),
-      // Multi-reference: gene blocks array
+      targets: this.fb.array([]), // unused but kept to prevent deep bridge breakage if needed
+      // Always use gene blocks array (Unified Mode)
       genes: this.fb.array([this.createGeneGroup()])
     });
   }
@@ -178,12 +190,7 @@ export class App implements OnInit, OnDestroy {
     });
   }
 
-  // Single-ref helpers
-  get targets() { return this.analysisForm.get('targets') as FormArray; }
-  addTarget() { this.targets.push(this.createTargetGroup()); }
-  removeTarget(i: number) { if (this.targets.length > 1) this.targets.removeAt(i); }
-
-  // Multi-ref gene helpers
+  // ── Multi-ref gene helpers (Unified) ──────────────────────────────────────
   get geneBlocks() { return this.analysisForm.get('genes') as FormArray; }
   addGene() { this.geneBlocks.push(this.createGeneGroup()); }
   removeGene(i: number) { if (this.geneBlocks.length > 1) this.geneBlocks.removeAt(i); }
@@ -217,19 +224,15 @@ export class App implements OnInit, OnDestroy {
   removeFile(i: number) { this.selectedFiles.splice(i, 1); }
 
   toggleMockMode() {
-    this.useMock = !this.useMock;
-    this.analysisService.setMockMode(this.useMock);
-    this.addLog(`Mock mode: ${this.useMock}`);
+    this.addLog(`Mock mode is no longer supported.`);
   }
 
   // ── Run analysis ───────────────────────────────────────────────────────────
   runAnalysis() {
     try {
-      const formInvalid = this.isMultiReferenceMode
-        ? this.analysisForm.get('genes')?.invalid
-        : this.analysisForm.get('targets')?.invalid || this.analysisForm.get('interestRegion')?.invalid;
+      const formInvalid = this.analysisForm.get('genes')?.invalid || this.analysisForm.get('interestRegion')?.invalid;
 
-      if (formInvalid || (this.selectedFiles.length === 0 && !this.useMock)) {
+      if (formInvalid || this.selectedFiles.length === 0) {
         this.error = 'Validation failed. Check files and parameters.';
         this.cdr.detectChanges();
         return;
@@ -257,37 +260,28 @@ export class App implements OnInit, OnDestroy {
       formData.append('interest_region', (rawValue.interestRegion || 90).toString());
       formData.append('phred_threshold', (rawValue.phredThreshold || 10).toString());
       formData.append('indel_threshold', (rawValue.indelThreshold || 1.0).toString());
-      formData.append('is_multi_reference', this.isMultiReferenceMode ? 'true' : 'false');
+      formData.append('is_multi_reference', 'true');
       formData.append('assignment_margin_threshold', this.assignmentMarginThreshold.toString());
 
-      if (this.isMultiReferenceMode) {
-        // Build gene-structured payload from the multi-ref form
-        const genesPayload = rawValue.genes.map((g: any) => ({
-          gene: g.gene_name,
-          sequence: g.gene_reference,
-          targets: g.geneTargets.map((t: any) => ({
-            target_id: t.target_id,
-            sgrna_seq: t.gRNA,
-            reference_seq: g.gene_reference,
-            window_size: rawValue.interestRegion || 90
-          }))
-        }));
-        formData.append('targets', JSON.stringify(genesPayload));
-        this.addLog(`Multi-Ref: ${genesPayload.length} gene(s), ${genesPayload.reduce((s: number, g: any) => s + g.targets.length, 0)} total target(s)`);
-      } else {
-        formData.append('targets', JSON.stringify(rawValue.targets));
-        this.addLog(`Single-Ref: ${rawValue.targets.length} target(s)`);
-      }
+      // Unified gene payload
+      const genesPayload = rawValue.genes.map((g: any) => ({
+        gene: g.gene_name,
+        sequence: g.gene_reference,
+        targets: g.geneTargets.map((t: any) => ({
+          target_id: t.target_id,
+          sgrna_seq: t.gRNA,
+          reference_seq: g.gene_reference,
+          window_size: rawValue.interestRegion || 90
+        }))
+      }));
+      formData.append('targets', JSON.stringify(genesPayload));
+      this.addLog(`Unified Analysis: ${genesPayload.length} gene(s), ${genesPayload.reduce((s: number, g: any) => s + g.targets.length, 0)} total target(s)`);
 
       this.analysisService.runAnalysis(formData).subscribe({
         next: (res: any) => {
           this.ngZone.run(() => {
-            if (this.useMock) {
-              this.handleAnalysisComplete(res);
-            } else {
               this.setProgress(10, 'Request accepted – queued…');
               this.startPolling(res.task_id);
-            }
           });
         },
         error: (err) => {
@@ -349,43 +343,33 @@ export class App implements OnInit, OnDestroy {
         const allResults: any[] = res?.results ?? [];
         console.log('[MULTIREF DEBUG] result count:', allResults.length);
 
-        if (metaFlag || allResults.some((r: any) => r?.multi_reference_result?.genes?.length > 0)) {
-          // ── Multi-reference mode ───────────────────────────────────────────
-          this.isMultiReference = true;
-          this.result = null;
-          this.multiFileCount = allResults.length;
+        // Unified result handling
+        this.isMultiReference = true;
+        this.result = null;
+        this.multiFileCount = allResults.length;
 
-          // Merge gene results across files: same gene name → accumulate assigned_read_count
-          const geneMap = new Map<string, GeneResult>();
-          let totalAmbiguous = 0;
+        // Merge gene results across files: same gene name → accumulate assigned_read_count
+        const geneMap = new Map<string, GeneResult>();
+        let totalAmbiguous = 0;
 
-          for (const fileResult of allResults) {
-            const mrd: MultiReferenceResponse | undefined = fileResult?.multi_reference_result;
-            if (!mrd) continue;
-            totalAmbiguous += mrd.ambiguous_read_count ?? 0;
-            for (const geneRes of (mrd.genes ?? [])) {
-              if (geneMap.has(geneRes.gene)) {
-                // Merge: add read counts, but keep first file's targets (they share same reference)
-                const existing = geneMap.get(geneRes.gene)!;
-                existing.assigned_read_count += geneRes.assigned_read_count;
-              } else {
-                geneMap.set(geneRes.gene, { ...geneRes });
-              }
+        for (const fileResult of allResults) {
+          const mrd: MultiReferenceResponse | undefined = fileResult?.multi_reference_result;
+          if (!mrd) continue;
+          totalAmbiguous += mrd.ambiguous_read_count ?? 0;
+          for (const geneRes of (mrd.genes ?? [])) {
+            if (geneMap.has(geneRes.gene)) {
+              const existing = geneMap.get(geneRes.gene)!;
+              existing.assigned_read_count += geneRes.assigned_read_count;
+            } else {
+              geneMap.set(geneRes.gene, { ...geneRes });
             }
           }
-
-          this.genes = Array.from(geneMap.values());
-          this.ambiguousReadCount = totalAmbiguous;
-          this.selectedGeneIndex = 0;
-          console.log('[MULTIREF DEBUG] ✔ Gene-tab mode. Genes:', this.genes.map(g => g.gene));
-          this.addLog(`Multi-Ref complete: ${this.genes.length} gene(s) across ${this.multiFileCount} file(s)`);
-        } else {
-          // ── Single-reference mode (unchanged) ─────────────────────────────
-          this.isMultiReference = false;
-          this.genes = [];
-          this.result = res;
-          this.addLog(`Single-Ref complete.`);
         }
+
+        this.genes = Array.from(geneMap.values());
+        this.ambiguousReadCount = totalAmbiguous;
+        this.selectedGeneIndex = 0;
+        this.addLog(`Analysis complete: ${this.genes.length} gene(s) across ${this.multiFileCount} sample(s)`);
 
         this.selectedRowIndex = 0;
         this.refreshDashboard();
@@ -412,24 +396,17 @@ export class App implements OnInit, OnDestroy {
   selectedRowIndex = 0;
 
   get flatTargets() {
-    if (this.isMultiReference && this.currentGene) {
-      return (this.currentGene.analysis_result.targets || []).map(t => ({
-        file: { fastq_file: '', sample_name: this.currentGene!.gene, target_results: [] as any[] },
-        target: t
-      }));
-    }
-    if (!this.result?.results) return [];
-    return this.result.results.flatMap(f =>
-      (f.target_results || []).map(t => ({ file: f, target: t }))
-    );
+    if (!this.currentGene) return [];
+    return (this.currentGene.analysis_result.targets || []).map(t => ({
+      file: { fastq_file: '', sample_name: this.currentGene!.gene, target_results: [] as any[] },
+      target: t
+    }));
   }
 
   get summaryTableData() {
     return this.flatTargets.map((item, index) => ({
       index,
-      sample: this.isMultiReference
-        ? this.currentGene?.gene ?? 'Gene'
-        : (item.file.sample_name || item.file.fastq_file.split('/').pop()),
+      sample: this.currentGene?.gene ?? 'Gene',
       target: item.target.target_id,
       total: item.target.summary?.total_reads ?? 0,
       matched: item.target.summary?.matched_reads ?? 0,
@@ -448,18 +425,11 @@ export class App implements OnInit, OnDestroy {
   selectedTarget: any = null;
 
   private refreshDashboard() {
-    if (this.isMultiReference) {
-      const gene = this.currentGene;
-      if (!gene?.analysis_result?.targets?.length) return;
-      const targets = gene.analysis_result.targets;
-      const idx = Math.min(this.selectedRowIndex, targets.length - 1);
-      this.selectedTarget = targets[idx];
-    } else {
-      const flat = this.flatTargets;
-      if (!flat.length) return;
-      if (this.selectedRowIndex >= flat.length) this.selectedRowIndex = 0;
-      this.selectedTarget = flat[this.selectedRowIndex].target;
-    }
+    const gene = this.currentGene;
+    if (!gene?.analysis_result?.targets?.length) return;
+    const targets = gene.analysis_result.targets;
+    const idx = Math.min(this.selectedRowIndex, targets.length - 1);
+    this.selectedTarget = targets[idx];
 
     if (!this.selectedTarget) return;
 
@@ -571,5 +541,178 @@ export class App implements OnInit, OnDestroy {
         }
       }));
     }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BENCHMARK TAB STATE
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Which top-level tab is active: 'analysis' | 'benchmark' */
+  activeTab: 'analysis' | 'benchmark' = 'analysis';
+
+  // ── Benchmark Parameters ──────────────────────────────────────────────────
+  benchPhred  = 10;
+  benchWindow = 90;
+  benchMargin = 0.05;
+
+  // ── Benchmark Dataset rows ────────────────────────────────────────────────
+  benchRows: BenchmarkRow[] = [this.emptyBenchRow()];
+
+  emptyBenchRow(): BenchmarkRow {
+    return { file: null, geneName: '', targetName: '', referenceSequence: '', grnaSequence: '' };
+  }
+
+  addBenchRow()    { this.benchRows.push(this.emptyBenchRow()); }
+  removeBenchRow(i: number) { if (this.benchRows.length > 1) this.benchRows.splice(i, 1); }
+
+  onBenchFileSelected(event: any, i: number) {
+    const f = event.target.files?.[0];
+    if (f && f.name.match(/\.(fastq|fq)$/i)) this.benchRows[i].file = f;
+  }
+
+  // ── Benchmark State ───────────────────────────────────────────────────────
+  benchIsLoading  = false;
+  benchProgress   = 0;
+  benchProgressDisplay = 0;
+  benchStage      = '';
+  benchError: string | null = null;
+
+  splitPreview: SplitPreview | null = null;
+  trainResult:  BenchmarkResult | null = null;
+  testResult:   BenchmarkResult | null = null;
+  private benchDestroy$ = new Subject<void>();
+  private benchProgressAnimId: any = null;
+
+  private setBenchProgress(target: number, stage: string) {
+    this.benchProgress = target;
+    this.benchStage    = stage;
+    if (this.benchProgressAnimId) clearInterval(this.benchProgressAnimId);
+    this.benchProgressAnimId = setInterval(() => {
+      const diff = this.benchProgress - this.benchProgressDisplay;
+      if (Math.abs(diff) < 0.5) {
+        this.benchProgressDisplay = this.benchProgress;
+        clearInterval(this.benchProgressAnimId);
+      } else {
+        this.benchProgressDisplay = Math.round(this.benchProgressDisplay + diff * 0.2);
+      }
+      this.cdr.detectChanges();
+    }, 60);
+  }
+
+  private validateBenchRows(): boolean {
+    for (const r of this.benchRows) {
+      if (!r.file || !r.geneName.trim() || !r.targetName.trim() ||
+          !r.referenceSequence.trim() || !r.grnaSequence.trim()) {
+        this.benchError = 'All rows must have a FASTQ file, gene name, target name, reference sequence, and gRNA.';
+        this.cdr.detectChanges();
+        return false;
+      }
+    }
+    this.benchError = null;
+    return true;
+  }
+
+  private buildBenchFormData(subset?: string): FormData {
+    const fd = new FormData();
+    const meta: any[] = [];
+    this.benchRows.forEach(r => {
+      fd.append('files', r.file!, r.file!.name);
+      meta.push({ gene: r.geneName, target: r.targetName,
+                  reference: r.referenceSequence, grna: r.grnaSequence });
+    });
+    fd.append('dataset', JSON.stringify(meta));
+    fd.append('phred',   this.benchPhred.toString());
+    fd.append('window',  this.benchWindow.toString());
+    fd.append('margin',  this.benchMargin.toString());
+    if (subset) fd.append('subset', subset);
+    return fd;
+  }
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+
+  buildSplitPreview() {
+    if (!this.validateBenchRows()) return;
+    this.splitPreview      = null;
+    this.benchError        = null;
+    this.benchIsLoading    = true;
+    this.benchProgressDisplay = 0;
+    this.setBenchProgress(10, 'Computing split preview…');
+    this.cdr.detectChanges();
+
+    const fd = this.buildBenchFormData();
+    this.analysisService.benchmarkSplitPreview(fd).subscribe({
+      next: (res) => this.ngZone.run(() => {
+        this.splitPreview         = res;
+        this.benchIsLoading       = false;
+        this.benchProgressDisplay = 100;
+        this.setBenchProgress(100, 'Split preview ready');
+        this.cdr.detectChanges();
+      }),
+      error: (err) => this.ngZone.run(() => {
+        this.benchError           = err?.error?.detail || err?.message || 'Split preview failed.';
+        this.benchIsLoading       = false;
+        this.benchProgressDisplay = 0;
+        this.setBenchProgress(0, '');
+        this.cdr.detectChanges();
+      })
+    });
+  }
+
+  runTrainBenchmark() { this.runBench('train'); }
+  runTestBenchmark()  { this.runBench('test');  }
+
+  private runBench(subset: 'train' | 'test') {
+    if (!this.validateBenchRows()) return;
+    this.benchError           = null;
+    this.benchIsLoading       = true;
+    this.benchProgressDisplay = 0;
+    this.benchDestroy$.next();
+    this.setBenchProgress(5, `Starting ${subset} benchmark…`);
+    this.cdr.detectChanges();
+
+    const fd = this.buildBenchFormData(subset);
+    this.analysisService.runBenchmark(fd).subscribe({
+      next: (res) => this.ngZone.run(() => {
+        this.setBenchProgress(10, 'Queued — polling for results…');
+        this.startBenchPolling(res.task_id, subset);
+      }),
+      error: (err) => this.ngZone.run(() => {
+        this.benchError           = err?.error?.detail || err?.message || 'Failed to start benchmark.';
+        this.benchIsLoading       = false;
+        this.benchProgressDisplay = 0;
+        this.cdr.detectChanges();
+      })
+    });
+  }
+
+  private startBenchPolling(taskId: string, subset: 'train' | 'test') {
+    timer(0, 1200).pipe(
+      takeUntil(this.benchDestroy$),
+      switchMap(() => this.analysisService.getTaskStatus(taskId))
+    ).subscribe({
+      next: (status) => this.ngZone.run(() => {
+        this.setBenchProgress(status.progress || 0, status.stage || '');
+        if (status.status === 'failed') {
+          this.benchError           = status.error || 'Benchmark failed.';
+          this.benchIsLoading       = false;
+          this.benchProgressDisplay = 0;
+          this.benchDestroy$.next();
+        } else if (status.progress === 100 && status.result) {
+          if (subset === 'train') this.trainResult = status.result;
+          else                    this.testResult  = status.result;
+          this.benchIsLoading       = false;
+          this.benchProgressDisplay = 100;
+          this.benchDestroy$.next();
+        }
+        this.cdr.detectChanges();
+      }),
+      error: () => this.ngZone.run(() => {
+        this.benchError           = 'Lost connection to status endpoint.';
+        this.benchIsLoading       = false;
+        this.benchProgressDisplay = 0;
+        this.benchDestroy$.next();
+        this.cdr.detectChanges();
+      })
+    });
   }
 }

@@ -20,10 +20,11 @@
 ---
 
 #### 3. 설정값(Parameter)은 무슨 뜻인가요?
-*   **Interest region (관심 영역)**: 사고가 난 지점(가위로 자른 곳) 주변을 얼마나 넓게 살펴볼지를 정하는 거예요. 보통 **90bp** 정도면 충분해요!
+*   **Window Size (윈도우 크기)**: 사고가 난 지점(가위로 자른 곳) 주변을 얼마나 넓게 살펴볼지를 정하는 거예요. 보통 **90bp** 정도면 충분해요!
 *   **Phred Threshold (품질 점수)**: 흐릿한 사진 대신 선명한 결과만 믿겠다는 기준이에요. 보통 **10점** 이상을 써요.
 *   **Assignment Margin (할당 여유값)**: 여러 유전자 후보 중 하나를 고를 때, 얼마나 확실해야 그 유전자로 인정할지 정하는 거예요. 값이 클수록 "정말 확실한 것"만 골라내요.
 *   **Indel Threshold (최소 빈도)**: 사소한 실수 말고, 전체의 **1%** 이상 일어난 굵직한 사건들만 보여주는 필터예요.
+*   **Classification Benchmark (성능 검증)**: 분석기가 유전자들을 얼마나 정확하게 분류하는지 스스로 시험해보고 성적표를 보여주는 도구예요.
 
 ---
 
@@ -33,14 +34,12 @@ The CRISPR Editing Analysis Tool is a high-performance analysis pipeline designe
 
 ## Key Features
 
-- **🧬 Multi-Reference Demultiplexing (New)**: Automatically assigns reads to the most likely gene/reference using strand-aware alignment. Ambiguous reads are safely excluded based on a configurable **Assignment Margin**.
-- **📊 Hierarchical Gene-Target UI**: Define multiple genes, each with its own reference sequence and multiple sgRNA targets.
-- **📈 Gene-Scoped Dashboard**: Navigate through results for different genes using a clean Tab-based interface. Each tab provides independent summary cards, charts, and annotation visuals.
-- **⚡ Fine-Grained Progress System**: Real-time, smooth progress bar that tracks the exact stage of analysis:
-  - FASTQ Parsing -> Read Assignment -> Per-Gene Analysis -> Per-Target Classification.
+- **🧬 Unified Classification Core (New)**: A single, shared k-mer scoring engine (`classifier.py`) powers both analysis and benchmarking, ensuring 100% statistical parity.
+- **📊 Classification Benchmark Tool**: A dedicated workflow to evaluate classification accuracy on train/test subsets with real-time performance metrics (Correct/Wrong/Ambiguous).
+- **🧪 Multi-Reference Demultiplexing**: Automatically assigns reads to the most likely (Gene, Target) pair using strand-aware k-mer window scoring.
+- **📈 Dual-Toggle Dashboard**: Independent "Analysis" and "Benchmark" modes that can be viewed side-by-side.
 - **🔍 Unified Annotation Grid**: Horizontally scrollable sequence viewport with vertical alignment for mutation patterns across all groups.
-- **📍 Precise Coordinate Mapping**: 1:1 character-to-pixel mapping for gRNA highlighting and cut-site (scissors) markers.
-- **📐 Canonical Normalization**: Automatically normalizes all metrics to the forward direction of the reference, regardless of gRNA strand orientation.
+- **📍 Precise Coordinate Mapping**: gRNA highlighting and cut-site (scissors) markers derived from unified target detection.
 
 ## Tech Stack
 
@@ -53,11 +52,13 @@ The CRISPR Editing Analysis Tool is a high-performance analysis pipeline designe
 ```bash
 ├── crispr_backend/
 │   ├── core/
-│   │   ├── multi_reference_assigner.py  # Read demultiplexing logic
-│   │   ├── aligner.py                   # Strand-aware alignment
-│   │   ├── analyzer.py                  # Mutation classification
+│   │   ├── classifier.py               # Shared classification & usability engine
+│   │   ├── benchmark.py                # Train/test benchmarking logic
+│   │   ├── multi_reference_assigner.py  # Unified demultiplexing wrapper
+│   │   ├── aligner.py                   # Strand-aware alignment utilities
+│   │   ├── analyzer.py                  # Mutation classification (Indels/Subs)
 │   │   └── parser.py                    # FASTQ parsing
-│   ├── api.py          # REST API & WebSocket-style status
+│   ├── api.py          # FastAPI endpoints (Analysis & Benchmark)
 │   └── run_local.py    # Main orchestration pipeline
 └── crispr-frontend/
     ├── src/app/

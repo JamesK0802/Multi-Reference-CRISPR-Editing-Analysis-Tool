@@ -98,3 +98,77 @@ export interface MultiRefFileResult {
   fastq_file: string;
   multi_reference_result: MultiReferenceResponse;
 }
+
+// ── Benchmark Tab Types ───────────────────────────────────────────────────────
+
+export interface BenchmarkRow {
+  file: File | null;
+  geneName: string;
+  targetName: string;
+  referenceSequence: string;
+  grnaSequence: string;
+}
+
+export interface SplitPreviewRow {
+  gene: string;
+  target: string;
+  total: number;
+  train_count: number;
+  test_count: number;
+}
+
+export interface SplitPreview {
+  rows: SplitPreviewRow[];
+  total: number;
+  train_count: number;
+  test_count: number;
+}
+
+export interface CutSiteInfo {
+  gene: string;
+  target: string;
+  strand: string;
+  cut_site: number;
+  grna_start: number;
+  grna_end: number;
+  pam: string;
+  pam_found: boolean;
+}
+
+export interface BenchmarkClassResult {
+  gene: string;
+  target: string;
+  total: number;
+  correct: number;
+  wrong: number;
+  ambiguous: number;
+  correct_rate: number;
+}
+
+export interface BenchmarkResult {
+  subset: string;
+  // Raw counts
+  total_reads: number;
+  filtered_out: number;
+  fail_no_anchor: number;
+  fail_quality: number;
+  fail_similarity: number;
+  usable_reads: number;
+  usable_rate: number;
+  // Classification counts (denominator = usable_reads)
+  correct_count: number;
+  wrong_count: number;
+  ambiguous_count: number;
+  // Rates over usable reads
+  correct_rate: number;
+  wrong_rate: number;
+  ambiguous_rate: number;
+  // Rates over total subset reads
+  correct_rate_total: number;
+  wrong_rate_total: number;
+  ambiguous_rate_total: number;
+  split_info: SplitPreviewRow[];
+  cut_sites: CutSiteInfo[];
+  per_class: BenchmarkClassResult[];
+}
+

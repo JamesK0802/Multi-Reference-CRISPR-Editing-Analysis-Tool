@@ -4,24 +4,26 @@
   <div class="header-section">
     <h1>CRISPR Analysis Tool</h1>
     <div class="controls">
-      <button (click)="toggleMockMode()" [class.active]="useMock" class="btn-toggle">
-        {{ useMock ? '🔬 Mock Data' : '📡 Live Mode' }}
-      </button>
-      <button (click)="isMultiReferenceMode = !isMultiReferenceMode"
-              [class.active]="isMultiReferenceMode"
-              class="btn-toggle btn-multiref"
-              title="Multi-Reference: demultiplex reads to each gene then run CRISPR analysis per gene">
-        {{ isMultiReferenceMode ? '🧬 Multi-Gene ON' : '🧬 Multi-Gene OFF' }}
-      </button>
+      <!-- Top-level tab switcher -->
+      <button (click)="toggleAnalysis()"
+              [class.active]="showAnalysis"
+              class="btn-toggle">🔬 Analysis</button>
+      <button (click)="toggleBenchmark()"
+              [class.active]="showBenchmark"
+              class="btn-toggle btn-bench-tab">📐 Benchmark</button>
+
+      <span class="controls-divider"></span>
+
+      <!-- Always in Unified Mode -->
     </div>
   </div>
 
   <!-- ══════════════ RESULTS DASHBOARD ══════════════ -->
-  <div *ngIf="result || (isMultiReference && genes.length > 0)"
+  <div *ngIf="showAnalysis && genes.length > 0"
        class="results-dashboard" id="resultsSection">
 
     <!-- ── Gene Tabs (Multi-Reference only) ── -->
-    <div *ngIf="isMultiReference && genes.length >= 1" class="gene-tabs-wrapper">
+    <div *ngIf="genes.length >= 1" class="gene-tabs-wrapper">
       <div class="gene-tabs" role="tablist">
         <button *ngFor="let g of genes; let i = index"
                 role="tab"
@@ -84,13 +86,13 @@
     <!-- ── Summary Table ── -->
     <div class="table-card">
       <h3>Detailed Summary Table
-        <span *ngIf="isMultiReference" class="table-gene-badge">{{ currentGene?.gene }}</span>
+        <span class="table-gene-badge">{{ currentGene?.gene }}</span>
       </h3>
       <div class="table-responsive">
         <table>
           <thead>
             <tr>
-              <th>{{ isMultiReference ? 'Gene' : 'Sample' }}</th>
+              <th>Gene</th>
               <th>Target</th>
               <th>Total</th>
               <th>Aligned</th>
@@ -123,11 +125,11 @@
   <!-- ══════════════ ANNOTATION PANEL ══════════════ -->
   <!-- Condition: selectedTarget must exist (works for BOTH single and multi-ref) -->
   <div class="annotation-panel"
-       *ngIf="selectedTarget && selectedTarget.top_groups && selectedTarget.top_groups.length > 0">
+       *ngIf="showAnalysis && selectedTarget && selectedTarget.top_groups && selectedTarget.top_groups.length > 0">
     <div class="anno-header">
       <div>
         <h2>ANNOTATION</h2>
-        <span *ngIf="isMultiReference" style="font-size:0.8rem;color:#1a9e55;font-weight:600;">
+        <span style="font-size:0.8rem;color:#1a9e55;font-weight:600;">
           {{ currentGene?.gene }} › {{ selectedTarget?.target_id }}
         </span>
       </div>
@@ -200,8 +202,8 @@
     </div>
   </div>
 
-  <!-- ══════════════ CONFIGURATION FORM ══════════════ -->
-  <form [formGroup]="analysisForm" (ngSubmit)="runAnalysis()">
+  <!-- ══════════════ CONFIGURATION FORM (Analysis) ══════════════ -->
+  <form *ngIf="showAnalysis" [formGroup]="analysisForm" (ngSubmit)="runAnalysis()">
     <div class="config-section">
 
       <!-- Upload Zone -->
@@ -269,10 +271,10 @@
           </select>
         </div>
         <div class="form-group">
-          <label>Interest region (+/- bp):</label>
+          <label>Window Size (bp):</label>
           <input type="number" formControlName="interestRegion" min="60" max="120" placeholder="60-120"
                  [class.invalid]="analysisForm.get('interestRegion')?.invalid && analysisForm.get('interestRegion')?.touched" />
-          <span class="hint-text">Range: 60–120 bp</span>
+          <span class="hint-text">Total window centered at cut site</span>
         </div>
         <div class="form-group">
           <label>Phred Threshold:</label>
@@ -282,59 +284,23 @@
           <label>Indel Threshold (%):</label>
           <input type="number" step="0.1" formControlName="indelThreshold" />
         </div>
-        <div class="form-group" *ngIf="isMultiReferenceMode">
-          <label style="color:#1a9e55;">Assignment Margin:</label>
-          <input type="number" step="0.01" min="0" max="1"
-                 [(ngModel)]="assignmentMarginThreshold"
-                 [ngModelOptions]="{standalone: true}"
-                 placeholder="0.05" />
-          <span class="hint-text">Higher → more ambiguous reads</span>
-        </div>
       </div>
 
       <hr class="divider" />
 
-      <!-- ══════════ SINGLE-REFERENCE TARGETS (legacy flat list) ══════════ -->
-      <div class="targets-section" *ngIf="!isMultiReferenceMode">
+      <!-- ══════════ REFERENCE CONFIGURATION (Unified) ══════════ -->
+      <div class="targets-section">
         <div class="section-header">
-          <h2>Targets Configuration</h2>
-          <button type="button" class="btn-add" (click)="addTarget()">+ Add Target</button>
-        </div>
-        <div formArrayName="targets">
-          <div *ngFor="let target of targets.controls; let i = index"
-               [formGroupName]="i" class="target-card">
-            <div class="target-card-header">
-              <h3>Target #{{ i + 1 }}</h3>
-              <button type="button" class="btn-remove-target" (click)="removeTarget(i)"
-                      *ngIf="targets.length > 1">Remove</button>
+          <h2>🧬 Reference Configuration</h2>
+          <div class="header-actions">
+            <div class="margin-input-group">
+              <label>Assignment Margin:</label>
+              <input type="number" step="0.01" min="0" max="1"
+                     [(ngModel)]="assignmentMarginThreshold"
+                     [ngModelOptions]="{standalone: true}" />
             </div>
-            <div class="target-card-body">
-              <div class="form-group">
-                <label>Target ID:</label>
-                <input type="text" formControlName="target_id" placeholder="e.g. HEK4_Site"
-                       [class.invalid]="target.get('target_id')?.invalid && target.get('target_id')?.touched" />
-              </div>
-              <div class="form-group">
-                <label>gRNA:</label>
-                <input type="text" formControlName="gRNA" placeholder="20bp sequence"
-                       [class.invalid]="target.get('gRNA')?.invalid && target.get('gRNA')?.touched" />
-              </div>
-              <div class="form-group full">
-                <label>Reference sequence:</label>
-                <textarea formControlName="reference_sequence" rows="3" class="monospaced"
-                          placeholder="Complete amplicon sequence"
-                          [class.invalid]="target.get('reference_sequence')?.invalid && target.get('reference_sequence')?.touched"></textarea>
-              </div>
-            </div>
+            <button type="button" class="btn-add" (click)="addGene()">+ Add Gene</button>
           </div>
-        </div>
-      </div>
-
-      <!-- ══════════ MULTI-REFERENCE GENE BLOCKS ══════════ -->
-      <div class="targets-section" *ngIf="isMultiReferenceMode">
-        <div class="section-header">
-          <h2>🧬 Gene / Reference Configuration</h2>
-          <button type="button" class="btn-add" (click)="addGene()">+ Add Gene</button>
         </div>
 
         <div formArrayName="genes">
@@ -360,7 +326,7 @@
                          [class.invalid]="gene.get('gene_name')?.invalid && gene.get('gene_name')?.touched" />
                 </div>
                 <div class="form-group full">
-                  <label>Gene Reference Sequence (full amplicon):</label>
+                  <label>Reference Sequence:</label>
                   <textarea formControlName="gene_reference" rows="3" class="monospaced"
                             placeholder="Complete reference sequence for this gene"
                             [class.invalid]="gene.get('gene_reference')?.invalid && gene.get('gene_reference')?.touched"></textarea>
@@ -379,12 +345,12 @@
                        [formGroupName]="ti" class="gene-target-row">
                     <span class="gene-target-num">T{{ ti + 1 }}</span>
                     <div class="form-group" style="flex:0 0 180px;">
-                      <label>Target ID:</label>
+                      <label>Target Name:</label>
                       <input type="text" formControlName="target_id" placeholder="e.g. Site1"
                              [class.invalid]="gt.get('target_id')?.invalid && gt.get('target_id')?.touched" />
                     </div>
                     <div class="form-group" style="flex:1;">
-                      <label>gRNA sequence:</label>
+                      <label>gRNA Sequence:</label>
                       <input type="text" formControlName="gRNA" placeholder="20bp gRNA"
                              [class.invalid]="gt.get('gRNA')?.invalid && gt.get('gRNA')?.touched" />
                     </div>
@@ -400,16 +366,334 @@
       </div>
 
       <button type="submit"
-              [disabled]="isLoading || (selectedFiles.length === 0 && !useMock)"
+              [disabled]="isLoading || (selectedFiles.length === 0)"
               class="btn-primary">
         {{ isLoading ? 'Analysis in Progress…' : 'Start CRISPR Analysis' }}
       </button>
     </div>
   </form>
 
-  <!-- ══════════════ ERROR ══════════════ -->
-  <div *ngIf="error" class="error-box">
+  <!-- ══════════════ ERROR (Analysis) ══════════════ -->
+  <div *ngIf="showAnalysis && error" class="error-box">
     <strong>Error:</strong> {{ error }}
   </div>
 
-</div>
+  <div class="workspace-divider" *ngIf="showAnalysis && showBenchmark"></div>
+
+  <!-- ══════════════════════ BENCHMARK SECTION ══════════════════════ -->
+  <div *ngIf="showBenchmark" class="bench-container">
+
+    <div class="bench-header">
+      <h2>📐 Classification Benchmark</h2>
+      <p class="bench-subtitle">Evaluate read-to-(gene, target) classification accuracy on train and test subsets. This workflow does <strong>not</strong> compute CRISPR editing metrics.</p>
+    </div>
+
+    <!-- ── Parameters ──────────────────────────────────────────────── -->
+    <div class="bench-params-card">
+      <h3>⚙️ Parameters</h3>
+      <div class="bench-params-row">
+        <div class="bench-param-group">
+          <label>Phred Threshold</label>
+          <input type="number" [(ngModel)]="benchPhred" min="0" max="40" />
+          <span class="hint-text">Min base quality score</span>
+        </div>
+        <div class="bench-param-group">
+          <label>Window Size (bp):</label>
+          <input type="number" [(ngModel)]="benchWindow" min="20" max="300" />
+          <span class="hint-text">Region centred at cut site</span>
+        </div>
+        <div class="bench-param-group">
+          <label>Assignment Margin</label>
+          <input type="number" [(ngModel)]="benchMargin" step="0.01" min="0" max="1" />
+          <span class="hint-text">top1 − top2 threshold</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Source Dataset Table ───────────────────────────────────────── -->
+    <div class="bench-dataset-card">
+      <div class="bench-dataset-header">
+        <h3>📂 Source Dataset</h3>
+        <button class="btn-add" (click)="addBenchRow()">+ Add Row</button>
+      </div>
+
+      <!-- Column headers -->
+      <div class="bench-table-head">
+        <span>FASTQ File</span>
+        <span>Gene Name</span>
+        <span>Target Name</span>
+        <span>Reference Sequence</span>
+        <span>gRNA Sequence</span>
+        <span></span>
+      </div>
+
+      <!-- Data rows -->
+      <div class="bench-row" *ngFor="let row of benchRows; let i = index">
+
+        <!-- FASTQ upload -->
+        <div class="bench-cell">
+          <label class="bench-file-label" [class.has-file]="row.file" [for]="'bfq_' + i">
+            {{ row.file ? row.file.name : '📁 Choose .fastq' }}
+          </label>
+          <input type="file" [id]="'bfq_' + i"
+                 accept=".fastq,.fq"
+                 (change)="onBenchFileSelected($event, i)" hidden />
+        </div>
+
+        <!-- Gene name -->
+        <div class="bench-cell">
+          <input type="text" [(ngModel)]="row.geneName" placeholder="e.g. GeneA"
+                 class="bench-input" />
+        </div>
+
+        <!-- Target name -->
+        <div class="bench-cell">
+          <input type="text" [(ngModel)]="row.targetName" placeholder="e.g. Site1"
+                 class="bench-input" />
+        </div>
+
+        <!-- Reference sequence -->
+        <div class="bench-cell">
+          <textarea [(ngModel)]="row.referenceSequence"
+                    class="bench-input bench-textarea"
+                    placeholder="Full reference sequence"
+                    rows="2"></textarea>
+        </div>
+
+        <!-- gRNA -->
+        <div class="bench-cell">
+          <input type="text" [(ngModel)]="row.grnaSequence"
+                 placeholder="20bp gRNA"
+                 class="bench-input" />
+        </div>
+
+        <!-- Remove -->
+        <div class="bench-cell bench-cell-action">
+          <button class="btn-remove" (click)="removeBenchRow(i)"
+                  *ngIf="benchRows.length > 1">&times;</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Action Buttons ──────────────────────────────────────────────── -->
+    <div class="bench-actions">
+      <button class="btn-bench btn-bench-split"
+              (click)="buildSplitPreview()"
+              [disabled]="benchIsLoading">🔀 Build Train/Test Split</button>
+      <button class="btn-bench btn-bench-train"
+              (click)="runTrainBenchmark()"
+              [disabled]="benchIsLoading">▶ Run Train Benchmark</button>
+      <button class="btn-bench btn-bench-test"
+              (click)="runTestBenchmark()"
+              [disabled]="benchIsLoading">▶ Run Test Benchmark</button>
+    </div>
+
+    <!-- ── Progress ─────────────────────────────────────────────────── -->
+    <div class="progress-section" *ngIf="benchIsLoading">
+      <div class="progress-header">
+        <span class="stage-text">{{ benchStage }}</span>
+        <span class="percent-text">{{ benchProgressDisplay }}%</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" [style.width.%]="benchProgressDisplay"></div>
+      </div>
+    </div>
+
+    <!-- ── Error ───────────────────────────────────────────────────── -->
+    <div *ngIf="benchError" class="error-box">{{ benchError }}</div>
+
+    <!-- ── Split Preview ───────────────────────────────────────────── -->
+    <div *ngIf="splitPreview" class="bench-result-card">
+      <h3>🔀 Train / Test Split Preview</h3>
+      <div class="bench-split-totals">
+        <div class="bench-split-badge train">Train set: {{ splitPreview.train_count | number }} reads</div>
+        <div class="bench-split-badge test" >Test set:  {{ splitPreview.test_count  | number }} reads</div>
+        <div class="bench-split-badge total">Total:     {{ splitPreview.total      | number }} reads</div>
+      </div>
+      <table class="bench-table">
+        <thead>
+          <tr>
+            <th>Gene Name</th><th>Target Name</th>
+            <th>Total</th><th>Train (80%)</th><th>Test (20%)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let row of splitPreview.rows">
+            <td>{{ row.gene }}</td>
+            <td><span class="badge">{{ row.target }}</span></td>
+            <td>{{ row.total       | number }}</td>
+            <td>{{ row.train_count | number }}</td>
+            <td>{{ row.test_count  | number }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ── Results side-by-side ──────────────────────────────────────── -->
+    <div class="bench-results-row" *ngIf="trainResult || testResult">
+
+      <!-- TRAIN result -->
+      <div class="bench-result-card" *ngIf="trainResult">
+        <h3>🟢 Train Benchmark Results</h3>
+        <div class="bench-metric-grid">
+          <div class="bench-metric correct">
+            <span class="bm-label">Correct</span>
+            <span class="bm-value">{{ trainResult.correct_rate }}%</span>
+            <span class="bm-count">{{ trainResult.correct_count | number }}</span>
+          </div>
+          <div class="bench-metric wrong">
+            <span class="bm-label">Wrong</span>
+            <span class="bm-value">{{ trainResult.wrong_rate }}%</span>
+            <span class="bm-count">{{ trainResult.wrong_count | number }}</span>
+          </div>
+          <div class="bench-metric ambiguous">
+            <span class="bm-label">Ambiguous</span>
+            <span class="bm-value">{{ trainResult.ambiguous_rate }}%</span>
+            <span class="bm-count">{{ trainResult.ambiguous_count | number }}</span>
+          </div>
+        </div>
+        <div class="bench-usability-info">
+          <div class="bu-main">
+            Usability: <strong>{{ trainResult.usable_rate }}%</strong> 
+            ({{ trainResult.usable_reads | number }} / {{ trainResult.total_reads | number }})
+          </div>
+          <div class="bu-breakdown">
+            Filtered out: {{ trainResult.filtered_out | number }} 
+            (Anchors: {{ trainResult.fail_no_anchor | number }}, 
+             Quality: {{ trainResult.fail_quality | number }}, 
+             Similarity: {{ trainResult.fail_similarity | number }})
+          </div>
+        </div>
+
+        <p class="bench-total-line">
+          Accuracy based on <strong>{{ trainResult.usable_reads | number }}</strong> usable reads
+        </p>
+
+        <!-- Per-class breakdown -->
+        <table class="bench-table">
+          <thead>
+            <tr><th>Gene Name</th><th>Target Name</th><th>Total</th>
+              <th>Correct</th><th>Wrong</th><th>Ambiguous</th><th>Acc %</th></tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let c of trainResult.per_class">
+              <td>{{ c.gene }}</td>
+              <td><span class="badge">{{ c.target }}</span></td>
+              <td>{{ c.total     | number }}</td>
+              <td class="td-correct">{{ c.correct   | number }}</td>
+              <td class="td-wrong">{{ c.wrong     | number }}</td>
+              <td class="td-ambig">{{ c.ambiguous | number }}</td>
+              <td><strong>{{ c.correct_rate }}%</strong></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- Cut site info -->
+        <details class="bench-cutsite-details" *ngIf="trainResult.cut_sites.length">
+          <summary>🔍 Derived Cut Sites</summary>
+          <table class="bench-table">
+            <thead>
+              <tr><th>Gene Name</th><th>Target Name</th><th>Strand</th>
+                <th>Cut</th><th>gRNA start</th><th>gRNA end</th>
+                <th>PAM</th><th>PAM found</th></tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let cs of trainResult.cut_sites">
+                <td>{{ cs.gene }}</td>
+                <td><span class="badge">{{ cs.target }}</span></td>
+                <td><span class="strand-badge" [class.fwd]="cs.strand === 'forward'" [class.rev]="cs.strand === 'reverse'">{{ cs.strand }}</span></td>
+                <td>{{ cs.cut_site }}</td>
+                <td>{{ cs.grna_start }}</td>
+                <td>{{ cs.grna_end }}</td>
+                <td class="monospaced">{{ cs.pam }}</td>
+                <td>{{ cs.pam_found ? '✅' : '⚠️' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </details>
+      </div>
+
+      <!-- TEST result -->
+      <div class="bench-result-card" *ngIf="testResult">
+        <h3>🔵 Test Benchmark Results</h3>
+        <div class="bench-metric-grid">
+          <div class="bench-metric correct">
+            <span class="bm-label">Correct</span>
+            <span class="bm-value">{{ testResult.correct_rate }}%</span>
+            <span class="bm-count">{{ testResult.correct_count | number }}</span>
+          </div>
+          <div class="bench-metric wrong">
+            <span class="bm-label">Wrong</span>
+            <span class="bm-value">{{ testResult.wrong_rate }}%</span>
+            <span class="bm-count">{{ testResult.wrong_count | number }}</span>
+          </div>
+          <div class="bench-metric ambiguous">
+            <span class="bm-label">Ambiguous</span>
+            <span class="bm-value">{{ testResult.ambiguous_rate }}%</span>
+            <span class="bm-count">{{ testResult.ambiguous_count | number }}</span>
+          </div>
+        </div>
+        <div class="bench-usability-info">
+          <div class="bu-main">
+            Usability: <strong>{{ testResult.usable_rate }}%</strong> 
+            ({{ testResult.usable_reads | number }} / {{ testResult.total_reads | number }})
+          </div>
+          <div class="bu-breakdown">
+            Filtered out: {{ testResult.filtered_out | number }} 
+            (Anchors: {{ testResult.fail_no_anchor | number }}, 
+             Quality: {{ testResult.fail_quality | number }}, 
+             Similarity: {{ testResult.fail_similarity | number }})
+          </div>
+        </div>
+
+        <p class="bench-total-line">
+          Accuracy based on <strong>{{ testResult.usable_reads | number }}</strong> usable reads
+        </p>
+
+        <table class="bench-table">
+          <thead>
+            <tr><th>Gene Name</th><th>Target Name</th><th>Total</th>
+              <th>Correct</th><th>Wrong</th><th>Ambiguous</th><th>Acc %</th></tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let c of testResult.per_class">
+              <td>{{ c.gene }}</td>
+              <td><span class="badge">{{ c.target }}</span></td>
+              <td>{{ c.total     | number }}</td>
+              <td class="td-correct">{{ c.correct   | number }}</td>
+              <td class="td-wrong">{{ c.wrong     | number }}</td>
+              <td class="td-ambig">{{ c.ambiguous | number }}</td>
+              <td><strong>{{ c.correct_rate }}%</strong></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <details class="bench-cutsite-details" *ngIf="testResult.cut_sites.length">
+          <summary>🔍 Derived Cut Sites</summary>
+          <table class="bench-table">
+            <thead>
+              <tr><th>Gene Name</th><th>Target Name</th><th>Strand</th>
+                <th>Cut</th><th>gRNA start</th><th>gRNA end</th>
+                <th>PAM</th><th>PAM found</th></tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let cs of testResult.cut_sites">
+                <td>{{ cs.gene }}</td>
+                <td><span class="badge">{{ cs.target }}</span></td>
+                <td><span class="strand-badge" [class.fwd]="cs.strand === 'forward'" [class.rev]="cs.strand === 'reverse'">{{ cs.strand }}</span></td>
+                <td>{{ cs.cut_site }}</td>
+                <td>{{ cs.grna_start }}</td>
+                <td>{{ cs.grna_end }}</td>
+                <td class="monospaced">{{ cs.pam }}</td>
+                <td>{{ cs.pam_found ? '✅' : '⚠️' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </details>
+      </div>
+
+    </div><!-- /bench-results-row -->
+
+  </div><!-- /bench-container -->
+
+</div><!-- /container -->

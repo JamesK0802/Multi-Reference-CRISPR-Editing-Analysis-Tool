@@ -1,120 +1,95 @@
-import difflib
-import statistics
-from core.aligner import reverse_complement
+"""
+multi_reference_assigner.py — Unified Demultiplexing for Multi-Gene Analysis.
+Now reuses the core.classifier logic for exact consistency with benchmarking.
+"""
 
-def calculate_alignment_score(read_seq, ref_seq):
-    """
-    Computes a simple alignment score between a read and a reference
-    using SequenceMatcher.
-    """
-    return difflib.SequenceMatcher(None, read_seq, ref_seq).ratio()
+import core.classifier as classifier
 
-def assign_reads_to_references(reads_data, references, margin_threshold=0.05):
+def assign_reads_to_references(reads_data, gene_payloads, phred_threshold=10, margin_threshold=0.05):
     """
-    Assigns each read to the best matching reference.
+    Unified read assignment using the shared classifier core.
     
     Args:
-        reads_data: List of tuples (seq, qual) from parser.
-        references: List of dicts [{"gene": "GeneA", "sequence": "ACTG..."}, ...]
-        margin_threshold: float, min difference between top 2 scores to make an assignment.
-        
-    Returns:
-        dict: {
-            "genes": [ {"gene": "GeneA", "assigned_reads": [...], "count": ...}, ... ],
-            "ambiguous_reads": [...],
-            "debug_logs": {...}
-        }
+        reads_data: List of tuples (seq, qual)
+        gene_payloads: List of { gene, sequence, targets: [{target_id, sgrna_seq}] }
+        phred_threshold: float
+        margin_threshold: float
     """
-    # Pre-calculate RC for references to avoid doing it per read if possible, 
-    # but actually we can just RC the read once per loop.
-    
+    # 1. Prepare target list for classifier
+    # We need a flat list of (gene, target, ref_window) candidates
+    classifier_classes = []
+    for g in gene_payloads:
+        gene_name = g["gene"]
+        gene_ref = g["sequence"]
+        for t in g.get("targets", []):
+            # Derive cut site and window for this (gene, target) pair
+            cut_info = classifier.find_grna_cut_site(gene_ref, t["sgrna_seq"])
+            # Use 90 as default window if not specified (matches frontend baseline)
+            win_size = t.get("window_size", 90)
+            ref_win = classifier.extract_window(gene_ref, cut_info["cut_site"], win_size)
+            
+            classifier_classes.append({
+                "gene": gene_name,
+                "target": t["target_id"],
+                "ref_window": ref_win
+            })
+
     results = {
-        "genes": {ref["gene"]: [] for ref in references},
+        "genes": {g["gene"]: [] for g in gene_payloads},
         "ambiguous_reads": []
     }
     
-    # Pre-store reference sequences (upper case for consistency)
-    refs = []
-    for r in references:
-        refs.append({
-            "gene": r["gene"],
-            "seq": r["sequence"].upper()
-        })
-        
     total_reads = len(reads_data)
     ambiguous_count = 0
-    assigned_counts = {r["gene"]: 0 for r in references}
-    score_sums = {r["gene"]: 0.0 for r in references} # for avg score
+    filtered_count = 0
+    assigned_counts = {g["gene"]: 0 for g in gene_payloads}
     
-    for i, (read_seq, read_qual) in enumerate(reads_data):
-        read_seq_upper = read_seq.upper()
-        rc_read_seq = reverse_complement(read_seq_upper)
-        
-        scores = []
-        for ref in refs:
-            # Score forward strand
-            score_fw = calculate_alignment_score(read_seq_upper, ref["seq"])
-            # Score reverse complement
-            score_rc = calculate_alignment_score(rc_read_seq, ref["seq"])
-            
-            best_strand_score = max(score_fw, score_rc)
-            scores.append((best_strand_score, ref["gene"]))
-            
-        # Sort by score descending
-        scores.sort(key=lambda x: x[0], reverse=True)
-        
-        best_score, best_gene = scores[0]
-        
-        # If only 1 reference, second best score is 0
-        second_best_score = scores[1][0] if len(scores) > 1 else 0.0
+    # 2. Iterate and classify
+    for i, (seq, qual) in enumerate(reads_data):
+        res = classifier.apply_classification(
+            seq, qual, 
+            classifier_classes, 
+            phred_threshold, 
+            margin_threshold
+        )
         
         read_obj = {
             "read_index": i,
-            "seq": read_seq,
-            "qual": read_qual,
-            "best_score": best_score,
-            "second_best_score": second_best_score
+            "seq": seq,
+            "qual": qual,
+            "best_score": res.get("top1_score", 0.0)
         }
         
-        if (best_score - second_best_score) > margin_threshold:
-            results["genes"][best_gene].append(read_obj)
-            assigned_counts[best_gene] += 1
-            score_sums[best_gene] += best_score
+        if res["assigned"]:
+            results["genes"][res["predicted_gene"]].append(read_obj)
+            assigned_counts[res["predicted_gene"]] += 1
         else:
-            results["ambiguous_reads"].append(read_obj)
-            ambiguous_count += 1
-            
-    # Format output
-    output = {
-        "genes": [],
-        "ambiguous_reads": results["ambiguous_reads"]
-    }
-    
-    for ref_gene, reads in results["genes"].items():
-        avg_score = (score_sums[ref_gene] / assigned_counts[ref_gene]) if assigned_counts[ref_gene] > 0 else 0.0
-        output["genes"].append({
-            "gene": ref_gene,
+            if res.get("reason") == "filtered":
+                filtered_count += 1
+            else:
+                results["ambiguous_reads"].append(read_obj)
+                ambiguous_count += 1
+                
+    # 3. Format output
+    output_genes = []
+    for gene_name, reads in results["genes"].items():
+        output_genes.append({
+            "gene": gene_name,
             "assigned_reads": reads,
-            "count": assigned_counts[ref_gene],
-            "average_score": avg_score
+            "count": len(reads),
+            "average_score": sum(r["best_score"] for r in reads) / len(reads) if reads else 0.0
         })
         
-    # Debug logs
-    debug_logs = {
-        "total_reads": total_reads,
-        "ambiguous_count": ambiguous_count,
-        "per_gene_counts": assigned_counts,
-        "average_scores": { 
-            g["gene"]: g["average_score"] for g in output["genes"] 
+    print(f"[CLASSIFIER_DEMUX] Finished: total={total_reads}, assigned={sum(assigned_counts.values())}, ambiguous={ambiguous_count}, filtered={filtered_count}")
+        
+    return {
+        "genes": output_genes,
+        "ambiguous_reads": results["ambiguous_reads"],
+        "debug_logs": {
+            "total_reads": total_reads,
+            "assigned_count": sum(assigned_counts.values()),
+            "ambiguous_count": ambiguous_count,
+            "filtered_count": filtered_count,
+            "per_gene_counts": assigned_counts
         }
     }
-    
-    output["debug_logs"] = debug_logs
-    
-    print(f"[DEBUG] Multi-Reference Assignment Finished:")
-    print(f"  Total reads: {total_reads}")
-    for gene_data in output["genes"]:
-        print(f"  Gene '{gene_data['gene']}' assigned count: {gene_data['count']} (Avg Score: {gene_data['average_score']:.3f})")
-    print(f"  Ambiguous reads count: {ambiguous_count}")
-    
-    return output

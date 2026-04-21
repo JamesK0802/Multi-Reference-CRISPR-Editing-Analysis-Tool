@@ -7,10 +7,10 @@ import difflib
 from core.parser import parse_fastq
 from core.aligner import (process_read_with_anchors, extract_window,
                            calculate_cut_site, find_target_in_reference,
-                           calculate_cut_site, find_target_in_reference,
                            reverse_complement)
 from core.analyzer import classify_mutation_with_alignment
 from core.multi_reference_assigner import assign_reads_to_references
+import core.classifier as classifier
 
 
 def run_analysis(fastq_file, targets, phred_threshold=10, indel_threshold=1.0):
@@ -101,52 +101,20 @@ def run_analysis_on_reads(data, targets, phred_threshold=10, indel_threshold=1.0
         groups_dict = {}
 
         # ── Step 4: Process each read ─────────────────────────────────────────
-        def _eval_strand(s, q):
-            r_inn, rd_inn, rd_q = process_read_with_anchors(
-                s, ref_window, quality_scores=q, anchor_len=12, check_rc=False
-            )
-            if r_inn is None: return {"fail": "no_anchor"}
-            avg_q = statistics.mean(rd_q) if rd_q else 0
-            if avg_q < phred_threshold: return {"fail": "quality"}
-            shorter = r_inn if len(r_inn) <= len(rd_inn) else rd_inn
-            longer  = rd_inn if len(r_inn) <= len(rd_inn) else r_inn
-            sim = difflib.SequenceMatcher(None, shorter, longer).ratio()
-            return {"fail": None, "ref_inner": r_inn, "read_inner": rd_inn, "sim": sim}
-
+        # USE UNIFIED CLASSIFIER CORE
+        import core.classifier as classifier
         for i, (seq, qual) in enumerate(data):
-            fw_res = _eval_strand(seq, qual)
-            rc_seq = reverse_complement(seq)
-            rc_qual = list(reversed(qual)) if qual else None
-            rc_res = _eval_strand(rc_seq, rc_qual)
-            
-            best_res = None
-            is_reverse = False
-            
-            if fw_res.get("fail") is None and rc_res.get("fail") is None:
-                if rc_res["sim"] > fw_res["sim"]:
-                    best_res = rc_res
-                    is_reverse = True
-                else:
-                    best_res = fw_res
-            elif fw_res.get("fail") is None:
-                best_res = fw_res
-            elif rc_res.get("fail") is None:
-                best_res = rc_res
-                is_reverse = True
-                
-            if best_res is None:
-                if fw_res.get("fail") == "quality" or rc_res.get("fail") == "quality":
+            usable, reason, best_res = classifier.is_read_usable(seq, qual, ref_window, phred_threshold)
+
+            if not usable:
+                if reason == "quality": 
                     counts["fail_quality"] += 1
-                else:
-                    counts["fail_no_anchor"] += 1
+                else: 
+                    counts[f"fail_{reason}"] += 1
                 continue
                 
-            if best_res["sim"] < INNER_SIMILARITY_MIN:
-                counts["fail_similarity"] += 1
-                continue
-            
             counts["aligned_reads"] += 1
-            if is_reverse:
+            if best_res["is_rc"]:
                 counts["reverse_aligned"] += 1
             else:
                 counts["forward_aligned"] += 1
@@ -181,7 +149,7 @@ def run_analysis_on_reads(data, targets, phred_threshold=10, indel_threshold=1.0
                     "net_indel":      len(read_inner) - len(ref_inner),
                     "similarity":     round(sim, 3),
                     "classification": category,
-                    "orientation":    "RC" if is_reverse else "FW"
+                    "orientation":    "RC" if best_res["is_rc"] else "FW"
                 })
 
         # ── Step 5: Debug logging ─────────────────────────────────────────────
@@ -492,10 +460,15 @@ def process_files_multi(file_paths, genes_payload, data_type="single-end", phred
             progress_callback(int(file_base + file_range * 0.10),
                               f"Assigning {total_reads:,} reads to {total_genes} genes (file {fi+1}/{total_files})")
 
-        # Demultiplex
+        # Demultiplex using Unified Classifier Core
         from core.multi_reference_assigner import assign_reads_to_references
-        demux_refs = [{"gene": g["gene"], "sequence": g["sequence"]} for g in genes_payload]
-        demux_result = assign_reads_to_references(data, demux_refs, margin_threshold)
+        import core.classifier as classifier
+        demux_result = assign_reads_to_references(
+            data, 
+            genes_payload, 
+            phred_threshold=phred_threshold, 
+            margin_threshold=margin_threshold
+        )
         ambiguous_count = len(demux_result["ambiguous_reads"])
 
         if progress_callback:
