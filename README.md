@@ -1,34 +1,6 @@
 # CRISPR Editing Analysis Tool
 
-### ✂️ 초등학생도 이해하는 유전자 가위 분석기 가이드
-
-유전공학이나 전문 지식이 없어도 괜찮아요! 이 툴이 무엇을 하고, 각 설정이 무엇을 의미하는지 아주 쉽게 설명해 드릴게요.
-
----
-
-#### 1. CRISPR(크리스퍼)가 뭐예요?
-우리 몸속에는 **DNA**라고 불리는 아주 긴 '설계도'가 들어있어요. 이 설계도에 따라 우리 눈 색깔, 키 등이 결정되죠. 그런데 이 설계도에 오타가 있거나 고치고 싶은 부분이 있을 때, 전용 **'유전자 가위'**를 사용해서 그 부분을 싹둑 자를 수 있어요. 이게 바로 **CRISPR** 기술이에요!
-
-#### 2. 이 프로그램은 어떤 일을 하나요?
-가위로 DNA를 자르고 나면, 세포가 이걸 다시 붙이려고 노력해요. 하지만 붙이다 보면 실수를 할 때가 있죠! 
-- 원래보다 조금 더 많이 붙이거나 (**삽입**)
-- 조각을 잃어버리거나 (**결실**)
-- 엉뚱한 조각으로 갈아끼우거나 (**치환**)
-
-이 프로그램은 수억 개의 DNA 조각들을 슈퍼 컴퓨터처럼 빠르게 살펴보고, **"가위가 정확히 어디를 잘랐는지"** 그리고 **"세포가 고칠 때 어떤 실수를 얼마나 많이 했는지"**를 한눈에 보여주는 똑똑한 돋보기예요. 특히, **여러 유전자가 섞인 파일**에서도 어떤 조각이 어떤 유전자인지 척척 찾아내어 따로따로 분석할 수 있답니다!
-
----
-
-#### 3. 설정값(Parameter)은 무슨 뜻인가요?
-*   **Window Size (윈도우 크기)**: 사고가 난 지점(가위로 자른 곳) 주변을 얼마나 넓게 살펴볼지를 정하는 거예요. 보통 **90bp** 정도면 충분해요!
-*   **Phred Threshold (품질 점수)**: 흐릿한 사진 대신 선명한 결과만 믿겠다는 기준이에요. 보통 **10점** 이상을 써요.
-*   **Assignment Margin (할당 여유값)**: 여러 유전자 후보 중 하나를 고를 때, 얼마나 확실해야 그 유전자로 인정할지 정하는 거예요. 값이 클수록 "정말 확실한 것"만 골라내요.
-*   **Indel Threshold (최소 빈도)**: 사소한 실수 말고, 전체의 **1%** 이상 일어난 굵직한 사건들만 보여주는 필터예요.
-*   **Classification Benchmark (성능 검증)**: 분석기가 유전자들을 얼마나 정확하게 분류하는지 스스로 시험해보고 성적표를 보여주는 도구예요.
-
----
-
-## Overview
+# Overview
 
 The CRISPR Editing Analysis Tool is a high-performance analysis pipeline designed to quantify genome editing efficiency. It supports both **Single-Reference** and **Multi-Reference** (demultiplexing) workflows, allowing researchers to process mixed FASTQ files containing multiple genetic loci in a single run.
 
