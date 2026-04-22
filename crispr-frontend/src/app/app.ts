@@ -37,28 +37,78 @@ export class App implements OnInit, OnDestroy {
   isLoading = false;
 
   // ── Mode selection ────────────────────────────────────────────────────────
-  assignmentMarginThreshold = 0.05;
+  assignmentMarginThreshold = 3;
 
   // ── View state ────────────────────────────────────────────────────────────
   showAnalysis = true;
   showBenchmark = false;
 
-  // Analysis result rendering state
+  multiFileCount = 0;        // how many FASTQ files were in the response
+
+  // ── Analysis result rendering state ──
   isMultiReference = false;
   genes: GeneResult[] = [];
   selectedGeneIndex = 0;
   ambiguousReadCount = 0;
-  multiFileCount = 0;        // how many FASTQ files were in the response
+
+  // ── Scope state ────────────────────────────────────────────────────────────
+  mergedGenes: GeneResult[] = [];
+  totalMergedAmbiguous = 0;
+  allFileResults: any[] = [];
+  selectedScopeIndex = -1; // -1 = All, 0..N = File index
 
   get currentGene(): GeneResult | null {
     return this.genes.length > 0 ? this.genes[this.selectedGeneIndex] : null;
   }
 
   selectGene(index: number) {
-    this.selectedGeneIndex = index;
+    this.ngZone.run(() => {
+      this.selectedGeneIndex = index;
+      this.selectedRowIndex = 0;
+      this.destroyCharts();
+      this.refreshDashboard();
+      this.cdr.detectChanges();
+    });
+  }
+
+  selectScope(index: number) {
+    this.ngZone.run(() => {
+      this.selectedScopeIndex = index;
+      this.updateVisibleGenes();
+      this.cdr.detectChanges();
+    });
+  }
+
+  private updateVisibleGenes() {
+    const prevGeneName = this.currentGene?.gene;
+
+    if (this.selectedScopeIndex === -1) {
+      this.genes = this.mergedGenes;
+      this.ambiguousReadCount = this.totalMergedAmbiguous;
+    } else {
+      const fileRes = this.allFileResults[this.selectedScopeIndex];
+      const mrd = fileRes.multi_reference_result;
+      this.genes = mrd.genes || [];
+      this.ambiguousReadCount = mrd.ambiguous_read_count || 0;
+    }
+
+    if (prevGeneName) {
+      const newIdx = this.genes.findIndex((g: GeneResult) => g.gene === prevGeneName);
+      this.selectedGeneIndex = newIdx !== -1 ? newIdx : 0;
+    } else {
+      this.selectedGeneIndex = 0;
+    }
+
     this.selectedRowIndex = 0;
     this.destroyCharts();
     this.refreshDashboard();
+    this.cdr.detectChanges();
+  }
+
+  getScopeName(index: number): string {
+    if (index === -1) return 'All';
+    const path = this.allFileResults[index].fastq_file;
+    return path.split('/').pop() || path;
   }
 
   // ── Progress ───────────────────────────────────────────────────────────────
@@ -115,20 +165,30 @@ export class App implements OnInit, OnDestroy {
 
   // ── Smooth progress animation ──────────────────────────────────────────────
   private setProgress(target: number, stage: string) {
-    this.progress = target;
-    this.progressStage = stage;
-    // Animate display value towards target
-    if (this.progressAnimId) clearInterval(this.progressAnimId);
-    this.progressAnimId = setInterval(() => {
-      const diff = this.progress - this.progressDisplay;
-      if (Math.abs(diff) < 0.5) {
-        this.progressDisplay = this.progress;
+    this.ngZone.run(() => {
+      this.progress = target;
+      this.progressStage = stage;
+      if (this.progressAnimId) {
         clearInterval(this.progressAnimId);
-      } else {
-        this.progressDisplay = Math.round(this.progressDisplay + diff * 0.2);
+        this.progressAnimId = null;
       }
+      this.progressAnimId = setInterval(() => {
+        this.ngZone.run(() => {
+          const diff = this.progress - this.progressDisplay;
+          if (Math.abs(diff) < 0.5) {
+            this.progressDisplay = this.progress;
+            if (this.progressAnimId) {
+              clearInterval(this.progressAnimId);
+              this.progressAnimId = null;
+            }
+          } else {
+            this.progressDisplay = Math.round(this.progressDisplay + diff * 0.2);
+          }
+          this.cdr.detectChanges();
+        });
+      }, 60);
       this.cdr.detectChanges();
-    }, 60);
+    });
   }
 
   // Parse structured progress stage string from backend
@@ -155,12 +215,9 @@ export class App implements OnInit, OnDestroy {
   // ── Form ───────────────────────────────────────────────────────────────────
   private initForm() {
     this.analysisForm = this.fb.group({
-      dataType: ['single-end'],
       interestRegion: [90, [Validators.required, Validators.min(60), Validators.max(120)]],
       phredThreshold: [10],
       indelThreshold: [1.0],
-      targets: this.fb.array([]), // unused but kept to prevent deep bridge breakage if needed
-      // Always use gene blocks array (Unified Mode)
       genes: this.fb.array([this.createGeneGroup()])
     });
   }
@@ -177,7 +234,7 @@ export class App implements OnInit, OnDestroy {
   // Multi-ref gene block (has its own reference + nested target list)
   private createGeneGroup(): FormGroup {
     return this.fb.group({
-      gene_name: ['', Validators.required],
+      gene_name: [''],
       gene_reference: ['', Validators.required],
       geneTargets: this.fb.array([this.createGeneTargetGroup()])
     });
@@ -185,25 +242,48 @@ export class App implements OnInit, OnDestroy {
 
   private createGeneTargetGroup(): FormGroup {
     return this.fb.group({
-      target_id: ['', Validators.required],
+      target_id: [''],
       gRNA: ['', Validators.required]
     });
   }
 
   // ── Multi-ref gene helpers (Unified) ──────────────────────────────────────
   get geneBlocks() { return this.analysisForm.get('genes') as FormArray; }
-  addGene() { this.geneBlocks.push(this.createGeneGroup()); }
-  removeGene(i: number) { if (this.geneBlocks.length > 1) this.geneBlocks.removeAt(i); }
+  addGene() {
+    this.ngZone.run(() => {
+      this.geneBlocks.push(this.createGeneGroup());
+      this.cdr.detectChanges();
+    });
+  }
+
+  removeGene(i: number) {
+    this.ngZone.run(() => {
+      if (this.geneBlocks.length > 1) {
+        this.geneBlocks.removeAt(i);
+        this.cdr.detectChanges();
+      }
+    });
+  }
 
   getGeneTargets(geneIndex: number): FormArray {
     return this.geneBlocks.at(geneIndex).get('geneTargets') as FormArray;
   }
+
   addGeneTarget(geneIndex: number) {
-    this.getGeneTargets(geneIndex).push(this.createGeneTargetGroup());
+    this.ngZone.run(() => {
+      this.getGeneTargets(geneIndex).push(this.createGeneTargetGroup());
+      this.cdr.detectChanges();
+    });
   }
+
   removeGeneTarget(geneIndex: number, targetIndex: number) {
-    const arr = this.getGeneTargets(geneIndex);
-    if (arr.length > 1) arr.removeAt(targetIndex);
+    this.ngZone.run(() => {
+      const arr = this.getGeneTargets(geneIndex);
+      if (arr.length > 1) {
+        arr.removeAt(targetIndex);
+        this.cdr.detectChanges();
+      }
+    });
   }
 
   // ── File handling ──────────────────────────────────────────────────────────
@@ -256,19 +336,19 @@ export class App implements OnInit, OnDestroy {
         this.selectedFiles.forEach(f => formData.append('files', f, f.name));
       }
 
-      formData.append('data_type', rawValue.dataType);
+      formData.append('data_type', 'single-end');
       formData.append('interest_region', (rawValue.interestRegion || 90).toString());
       formData.append('phred_threshold', (rawValue.phredThreshold || 10).toString());
       formData.append('indel_threshold', (rawValue.indelThreshold || 1.0).toString());
       formData.append('is_multi_reference', 'true');
-      formData.append('assignment_margin_threshold', this.assignmentMarginThreshold.toString());
+      formData.append('assignment_margin_threshold', (this.assignmentMarginThreshold / 100).toString());
 
       // Unified gene payload
-      const genesPayload = rawValue.genes.map((g: any) => ({
-        gene: g.gene_name,
+      const genesPayload = rawValue.genes.map((g: any, gi: number) => ({
+        gene: g.gene_name?.trim() || `G${gi + 1}`,
         sequence: g.gene_reference,
-        targets: g.geneTargets.map((t: any) => ({
-          target_id: t.target_id,
+        targets: g.geneTargets.map((t: any, ti: number) => ({
+          target_id: t.target_id?.trim() || `T${ti + 1}`,
           sgrna_seq: t.gRNA,
           reference_seq: g.gene_reference,
           window_size: rawValue.interestRegion || 90
@@ -359,19 +439,32 @@ export class App implements OnInit, OnDestroy {
           for (const geneRes of (mrd.genes ?? [])) {
             if (geneMap.has(geneRes.gene)) {
               const existing = geneMap.get(geneRes.gene)!;
+              
+              // CRITICAL BUG FIX: If the new file result actually has analyzed reads for this gene,
+              // and the current 'existing' one is empty (or has fewer reads), update the analysis_result.
+              const newTotal = geneRes.analysis_result?.targets?.[0]?.summary?.total_reads ?? 0;
+              const curTotal = existing.analysis_result?.targets?.[0]?.summary?.total_reads ?? 0;
+              
+              if (newTotal > curTotal) {
+                existing.analysis_result = geneRes.analysis_result;
+              }
+              
               existing.assigned_read_count += geneRes.assigned_read_count;
             } else {
-              geneMap.set(geneRes.gene, { ...geneRes });
+              // Deep copy to prevent reference issues
+              geneMap.set(geneRes.gene, JSON.parse(JSON.stringify(geneRes)));
             }
           }
         }
 
-        this.genes = Array.from(geneMap.values());
-        this.ambiguousReadCount = totalAmbiguous;
-        this.selectedGeneIndex = 0;
-        this.addLog(`Analysis complete: ${this.genes.length} gene(s) across ${this.multiFileCount} sample(s)`);
+        this.mergedGenes = Array.from(geneMap.values());
+        this.totalMergedAmbiguous = totalAmbiguous;
+        this.allFileResults = allResults;
+        this.selectedScopeIndex = -1;
 
-        this.selectedRowIndex = 0;
+        this.updateVisibleGenes();
+        this.addLog(`Analysis complete: ${this.mergedGenes.length} gene(s) across ${this.multiFileCount} sample(s)`);
+
         this.refreshDashboard();
         this.setProgress(100, 'Analysis Complete ✓');
         this.isLoading = false;
@@ -425,28 +518,61 @@ export class App implements OnInit, OnDestroy {
   selectedTarget: any = null;
 
   private refreshDashboard() {
-    const gene = this.currentGene;
-    if (!gene?.analysis_result?.targets?.length) return;
-    const targets = gene.analysis_result.targets;
-    const idx = Math.min(this.selectedRowIndex, targets.length - 1);
-    this.selectedTarget = targets[idx];
+    this.ngZone.run(() => {
+      const gene = this.currentGene;
+      if (!gene?.analysis_result?.targets?.length) return;
+      const targets = gene.analysis_result.targets;
+      const idx = Math.min(this.selectedRowIndex, targets.length - 1);
+      this.selectedTarget = targets[idx];
 
-    if (!this.selectedTarget) return;
+      if (!this.selectedTarget) {
+        this.cdr.detectChanges();
+        return;
+      }
 
-    this.metrics = {
-      totalReads: this.selectedTarget.summary?.total_reads ?? 0,
-      alignedReads: this.selectedTarget.summary?.matched_reads ?? 0,
-      avgOutOfFrame: this.selectedTarget.summary?.out_of_frame_pct ?? 0,
-      avgInFrame: this.selectedTarget.summary?.in_frame_pct ?? 0,
-      avgNoIndel: this.selectedTarget.summary?.no_indel_pct ?? 0,
-      avgSubstitution: this.selectedTarget.summary?.substitution_pct ?? 0,
-    };
+      this.metrics = {
+        totalReads: this.selectedTarget.summary?.total_reads ?? 0,
+        alignedReads: this.selectedTarget.summary?.matched_reads ?? 0,
+        avgOutOfFrame: this.selectedTarget.summary?.out_of_frame_pct ?? 0,
+        avgInFrame: this.selectedTarget.summary?.in_frame_pct ?? 0,
+        avgNoIndel: this.selectedTarget.summary?.no_indel_pct ?? 0,
+        avgSubstitution: this.selectedTarget.summary?.substitution_pct ?? 0,
+      };
 
-    this.cdr.detectChanges();
-    setTimeout(() => {
-      this.updateChartsForSelected();
       this.cdr.detectChanges();
-    }, 50);
+
+      // Ensure DOM has settled before looking for chart canvases/annotation scrolling
+      setTimeout(() => {
+        this.ngZone.run(() => {
+          this.updateChartsForSelected();
+          this.centerAnnotation();
+          this.cdr.detectChanges();
+          // Final check to ensure UI reflects the latest state
+          this.cdr.markForCheck();
+        });
+      }, 64); // Slightly longer than one frame to ensure stability
+    });
+  }
+
+  private centerAnnotation() {
+    // We target the unified-anno-container which has overflow-x: auto
+    const container = document.querySelector('.unified-anno-container');
+    if (!container || !this.selectedTarget) return;
+
+    // Grid details from CSS: .base-box width is 13px
+    const cutIdx = this.selectedTarget.cut_site_index || 0;
+    const stickyLeftWidth = 150; // .sticky-left width
+    const baseWidth = 13;
+    const padding = 15; // .seq-center padding-left
+
+    // Approximate x-position of the cut site in the scrollable content
+    const xPos = stickyLeftWidth + (cutIdx * baseWidth) + padding;
+    
+    // Target scroll position to keep cut site in the center of the viewport
+    const viewportWidth = container.clientWidth;
+    const targetScroll = xPos - (viewportWidth / 2);
+
+    container.scrollLeft = Math.max(0, targetScroll);
   }
 
   // ── Charts ─────────────────────────────────────────────────────────────────
@@ -553,7 +679,7 @@ export class App implements OnInit, OnDestroy {
   // ── Benchmark Parameters ──────────────────────────────────────────────────
   benchPhred  = 10;
   benchWindow = 90;
-  benchMargin = 0.05;
+  benchMargin = 3;
 
   // ── Benchmark Dataset rows ────────────────────────────────────────────────
   benchRows: BenchmarkRow[] = [this.emptyBenchRow()];
@@ -584,26 +710,38 @@ export class App implements OnInit, OnDestroy {
   private benchProgressAnimId: any = null;
 
   private setBenchProgress(target: number, stage: string) {
-    this.benchProgress = target;
-    this.benchStage    = stage;
-    if (this.benchProgressAnimId) clearInterval(this.benchProgressAnimId);
-    this.benchProgressAnimId = setInterval(() => {
-      const diff = this.benchProgress - this.benchProgressDisplay;
-      if (Math.abs(diff) < 0.5) {
-        this.benchProgressDisplay = this.benchProgress;
+    this.ngZone.run(() => {
+      this.benchProgress = target;
+      this.benchStage    = stage;
+      if (this.benchProgressAnimId) {
         clearInterval(this.benchProgressAnimId);
-      } else {
-        this.benchProgressDisplay = Math.round(this.benchProgressDisplay + diff * 0.2);
+        this.benchProgressAnimId = null;
       }
+      this.benchProgressAnimId = setInterval(() => {
+        this.ngZone.run(() => {
+          const diff = this.benchProgress - this.benchProgressDisplay;
+          if (Math.abs(diff) < 0.3) {
+            this.benchProgressDisplay = this.benchProgress;
+            if (this.benchProgressAnimId) {
+              clearInterval(this.benchProgressAnimId);
+              this.benchProgressAnimId = null;
+            }
+          } else {
+            this.benchProgressDisplay += diff * 0.25;
+            // Round for cleaner UI if needed, but not strictly necessary for percent
+          }
+          this.cdr.detectChanges();
+          this.cdr.markForCheck();
+        });
+      }, 64);
       this.cdr.detectChanges();
-    }, 60);
+    });
   }
 
   private validateBenchRows(): boolean {
     for (const r of this.benchRows) {
-      if (!r.file || !r.geneName.trim() || !r.targetName.trim() ||
-          !r.referenceSequence.trim() || !r.grnaSequence.trim()) {
-        this.benchError = 'All rows must have a FASTQ file, gene name, target name, reference sequence, and gRNA.';
+      if (!r.file || !r.referenceSequence.trim() || !r.grnaSequence.trim()) {
+        this.benchError = 'All rows must have a FASTQ file, reference sequence, and gRNA.';
         this.cdr.detectChanges();
         return false;
       }
@@ -615,15 +753,19 @@ export class App implements OnInit, OnDestroy {
   private buildBenchFormData(subset?: string): FormData {
     const fd = new FormData();
     const meta: any[] = [];
-    this.benchRows.forEach(r => {
+    this.benchRows.forEach((r, idx) => {
       fd.append('files', r.file!, r.file!.name);
-      meta.push({ gene: r.geneName, target: r.targetName,
-                  reference: r.referenceSequence, grna: r.grnaSequence });
+      meta.push({ 
+        gene: r.geneName?.trim() || `G${idx + 1}`, 
+        target: r.targetName?.trim() || `T${idx + 1}`,
+        reference: r.referenceSequence, 
+        grna: r.grnaSequence 
+      });
     });
     fd.append('dataset', JSON.stringify(meta));
     fd.append('phred',   this.benchPhred.toString());
     fd.append('window',  this.benchWindow.toString());
-    fd.append('margin',  this.benchMargin.toString());
+    fd.append('margin',  (this.benchMargin / 100).toString());
     if (subset) fd.append('subset', subset);
     return fd;
   }

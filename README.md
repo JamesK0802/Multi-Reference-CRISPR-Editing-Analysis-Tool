@@ -2,16 +2,16 @@
 
 # Overview
 
-The CRISPR Editing Analysis Tool is a high-performance analysis pipeline designed to quantify genome editing efficiency. It supports both **Single-Reference** and **Multi-Reference** (demultiplexing) workflows, allowing researchers to process mixed FASTQ files containing multiple genetic loci in a single run.
+The CRISPR Editing Analysis Tool is a high-performance analysis pipeline designed to quantify genome editing efficiency. It supports a **Unified Multi-Reference** workflow, allowing researchers to process mixed or multiple FASTQ files containing various genetic loci in a single run with granular result scoping.
 
 ## Key Features
 
-- **🧬 Unified Classification Core (New)**: A single, shared k-mer scoring engine (`classifier.py`) powers both analysis and benchmarking, ensuring 100% statistical parity.
-- **📊 Classification Benchmark Tool**: A dedicated workflow to evaluate classification accuracy on train/test subsets with real-time performance metrics (Correct/Wrong/Ambiguous).
-- **🧪 Multi-Reference Demultiplexing**: Automatically assigns reads to the most likely (Gene, Target) pair using strand-aware k-mer window scoring.
-- **📈 Dual-Toggle Dashboard**: Independent "Analysis" and "Benchmark" modes that can be viewed side-by-side.
-- **🔍 Unified Annotation Grid**: Horizontally scrollable sequence viewport with vertical alignment for mutation patterns across all groups.
-- **📍 Precise Coordinate Mapping**: gRNA highlighting and cut-site (scissors) markers derived from unified target detection.
+- **📂 Multi-File Result Scoping (v1.2.0)**: Switch between "All Merged" view and individual per-file analysis directly in the results dashboard.
+- **🧬 Unified Classification Core**: A shared k-mer scoring engine (`classifier.py`) powers both analysis and benchmarking, ensuring 100% statistical parity.
+- **📊 Classification Benchmark Tool**: Dedicated workflow to evaluate classification accuracy on train/test subsets with real-time performance metrics.
+- **🔍 Auto-Centering Annotation Grid**: Horizontally scrollable sequence viewport that automatically focuses on the gRNA and cut-site (scissors) for instant inspection.
+- **📍 Precise Coordinate Mapping**: gRNA highlighting and scissors markers derived from unified target detection.
+- **🎨 Premium UX/UI**: Balanced 3x2 metrics grid, smoothed progress animations, and responsive dashboard layouts.
 
 ## Tech Stack
 
@@ -34,44 +34,54 @@ The CRISPR Editing Analysis Tool is a high-performance analysis pipeline designe
 │   └── run_local.py    # Main orchestration pipeline
 └── crispr-frontend/
     ├── src/app/
-    │   ├── app.ts      # State management & payload transformation
-    │   ├── app.html    # Hierarchical input & Tabbed results
+    │   ├── app.ts      # Reactive state management (NgZone & CDR optimized)
+    │   ├── app.html    # Hierarchical input & Scoped result tabs
+    │   ├── app.css     # Premium UI tokens and responsive layouts
     │   └── models/     # Multi-reference data models
-```
-
-## Installation & setup
-
-### 1. Backend
-```bash
-cd crispr_backend
-python -m venv venv
-source venv/bin/activate
-pip install fastapi uvicorn biopython python-multipart
-```
-
-### 2. Frontend
-```bash
-cd crispr-frontend
-npm install
 ```
 
 ## Running the Tool
 
 1.  **Start Backend**: `uvicorn api:app --reload --port 8000` (in `crispr_backend`)
-2.  **Start Frontend**: `npx ng serve` (in `crispr-frontend`)
+2.  **Start Frontend**: `npm start` (in `crispr-frontend`)
 3.  Open `http://localhost:4200`
 
-## Multi-Reference Analysis Guide
+## Analysis Guide
 
-1.  **Toggle Mode**: Click the **🧬 Multi-Gene OFF** button to toggle it to **ON**.
-2.  **Add Genes**: For each gene locus in your mixed FASTQ:
-    - Enter the **Gene Name** and **Full Reference Sequence**.
-    - Add one or more **Targets (gRNAs)** nested inside that gene.
-3.  **Set Margin**: Adjust **Assignment Margin** (default 0.05). Higher values make read assignment more conservative.
-4.  **Upload**: Select one or more `.fastq` files.
-5.  **Analyze**: Watch the live progress status display the exact file, gene, and target being processed!
+1.  **Configure Reference**: 
+    - Add **Genes** (G1, G2...) and their **Reference Sequences**.
+    - Add **Targets (T1, T2...)** nested inside each gene group. 
+    - *Tip: If names are left blank, G1/T1 will be assigned automatically.*
+2.  **Set Parameters**: 
+    - Adjust **Assignment Margin (%)** (default 3%). Higher values make read assignment more conservative.
+    - Set Indel/Phred thresholds as needed.
+3.  **Upload & Analyze**: Select one or more `.fastq` files and click **Start CRISPR Analysis**.
+4.  **Explore Results**:
+    - Use the **Top-level Tabs** to switch between **All Merged** and **Individual File** results.
+    - Use the **Gene Tabs** to drill down into specific loci.
+    - Click rows in the summary table to update charts and the annotation view.
+
+---
+
+## Version History
+
+### v1.2.0 (2026-04-22)
+- **New Feature**: Added top-level **Result Scope Tabs** (Merged vs Per-File).
+- **UX Refresh**: Repositioned parameter inputs into a single row; added automatic "G1, T1" fallback naming.
+- **UI Polish**: metrics grid reorganization (3x2), automatic annotation centering on cut sites.
+- **Stability**: Refactored frontend with `NgZone.run` and explicit change detection to fix UI update delays.
+- **Terminology**: Standardized "Assignment Margin" as a percentage (%) across both Analysis and Benchmark modes.
+
+### v1.1.0 (2026-04-20)
+- **Backend**: Implemented strand-aware k-mer demultiplexing for multi-reference analysis.
+- **Frontend**: Overhauled annotation panel to match CRISPRnano grid-style alignment and scrolling.
+
+### v1.0.0 (2026-04-15)
+- Initial release with integrated classification core and analysis dashboard.
+
+---
 
 ## AI Usage Disclaimer
 
 > [!NOTE]
-> This project was developed with the assistance of AI coding agents. The sophisticated multi-reference demultiplexing architecture and the hierarchical UI state management were evolved through agentic pair-programming to ensure high-quality, scientifically sound results.
+> This project was developed with the assistance of AI coding agents (Antigravity). The sophisticated multi-reference demultiplexing architecture, hierarchical UI state management, and real-time reactive updates were evolved through agentic pair-programming to ensure high-performance, scientifically sound results.

@@ -5,12 +5,9 @@
     <h1>CRISPR Analysis Tool</h1>
     <div class="controls">
       <!-- Top-level tab switcher -->
-      <button (click)="toggleAnalysis()"
-              [class.active]="showAnalysis"
-              class="btn-toggle">🔬 Analysis</button>
-      <button (click)="toggleBenchmark()"
-              [class.active]="showBenchmark"
-              class="btn-toggle btn-bench-tab">📐 Benchmark</button>
+      <button (click)="toggleAnalysis()" [class.active]="showAnalysis" class="btn-toggle">🔬 Analysis</button>
+      <button (click)="toggleBenchmark()" [class.active]="showBenchmark" class="btn-toggle btn-bench-tab">📐
+        Benchmark</button>
 
       <span class="controls-divider"></span>
 
@@ -19,18 +16,27 @@
   </div>
 
   <!-- ══════════════ RESULTS DASHBOARD ══════════════ -->
-  <div *ngIf="showAnalysis && genes.length > 0"
-       class="results-dashboard" id="resultsSection">
+  <div *ngIf="showAnalysis && genes.length > 0" class="results-dashboard" id="resultsSection">
+
+    <!-- ── Result Scope Tabs (Merged vs Per-File) ── -->
+    <div class="result-scope-wrapper" *ngIf="isMultiReference && multiFileCount > 1">
+      <div class="scope-tabs">
+        <button type="button" class="scope-tab-btn" [class.active]="selectedScopeIndex === -1"
+          (click)="selectScope(-1)">
+          <span class="scope-icon">📁</span> All Merged
+        </button>
+        <button type="button" class="scope-tab-btn" *ngFor="let res of allFileResults; let i = index"
+          [class.active]="selectedScopeIndex === i" (click)="selectScope(i)">
+          {{ getScopeName(i) }}
+        </button>
+      </div>
+    </div>
 
     <!-- ── Gene Tabs (Multi-Reference only) ── -->
     <div *ngIf="genes.length >= 1" class="gene-tabs-wrapper">
       <div class="gene-tabs" role="tablist">
-        <button *ngFor="let g of genes; let i = index"
-                role="tab"
-                class="gene-tab-btn"
-                [class.active]="i === selectedGeneIndex"
-                [id]="'gene-tab-' + i"
-                (click)="selectGene(i)">
+        <button *ngFor="let g of genes; let i = index" role="tab" class="gene-tab-btn"
+          [class.active]="i === selectedGeneIndex" [id]="'gene-tab-' + i" (click)="selectGene(i)">
           <span class="gene-tab-label">{{ g.gene }}</span>
           <span class="gene-tab-count">{{ g.assigned_read_count | number }} reads</span>
         </button>
@@ -38,12 +44,14 @@
       <div class="gene-info-stripe" *ngIf="currentGene">
         <span class="gene-info-item"><strong>Gene:</strong> {{ currentGene.gene }}</span>
         <span class="gene-info-sep">|</span>
-        <span class="gene-info-item"><strong>Assigned Reads:</strong> {{ currentGene.assigned_read_count | number }}</span>
+        <span class="gene-info-item"><strong>Assigned Reads:</strong> {{ currentGene.assigned_read_count | number
+          }}</span>
         <span class="gene-info-sep">|</span>
-        <span class="gene-info-item ambiguous"><strong>Ambiguous Excluded:</strong> {{ ambiguousReadCount | number }}</span>
+        <span class="gene-info-item ambiguous"><strong>Ambiguous Excluded:</strong> {{ ambiguousReadCount | number
+          }}</span>
         <span class="gene-info-sep" *ngIf="multiFileCount > 1">|</span>
         <span class="gene-info-item" *ngIf="multiFileCount > 1">
-          <strong>Files:</strong> {{ multiFileCount }}
+          <strong>Source:</strong> {{ selectedScopeIndex === -1 ? 'All Merged' : getScopeName(selectedScopeIndex) }}
         </span>
       </div>
     </div>
@@ -103,10 +111,8 @@
             </tr>
           </thead>
           <tbody>
-            <tr *ngFor="let row of summaryTableData; let i = index"
-                (click)="selectRow(i)"
-                [class.row-selected]="i === selectedRowIndex"
-                style="cursor: pointer; transition: background-color 0.2s;">
+            <tr *ngFor="let row of summaryTableData; let i = index" (click)="selectRow(i)"
+              [class.row-selected]="i === selectedRowIndex" style="cursor: pointer; transition: background-color 0.2s;">
               <td>{{ row.sample }}</td>
               <td><span class="badge">{{ row.target }}</span></td>
               <td>{{ row.total | number }}</td>
@@ -125,7 +131,7 @@
   <!-- ══════════════ ANNOTATION PANEL ══════════════ -->
   <!-- Condition: selectedTarget must exist (works for BOTH single and multi-ref) -->
   <div class="annotation-panel"
-       *ngIf="showAnalysis && selectedTarget && selectedTarget.top_groups && selectedTarget.top_groups.length > 0">
+    *ngIf="showAnalysis && selectedTarget && selectedTarget.top_groups && selectedTarget.top_groups.length > 0">
     <div class="anno-header">
       <div>
         <h2>ANNOTATION</h2>
@@ -148,21 +154,23 @@
           <div class="sticky-left">REFERENCE 5'→3'</div>
           <div class="seq-center">
             <!-- gRNA track -->
-            <div class="grna-track" *ngIf="selectedTarget.grna_start_index !== undefined && selectedTarget.grna_start_index !== -1">
+            <div class="grna-track"
+              *ngIf="selectedTarget.grna_start_index !== undefined && selectedTarget.grna_start_index !== -1">
               <div style="position: absolute; display: flex; bottom: 2px; border-bottom: 2px solid #34495e;"
-                   [style.left.px]="selectedTarget.grna_start_index * 13">
-                <span class="base-box" *ngFor="let char of (selectedTarget.display_sgrna_seq || selectedTarget.sgrna_seq || '').split('')"
-                      style="font-size: 11px; font-weight: 800; color: #34495e; font-family: monospace;">{{ char }}</span>
+                [style.left.px]="selectedTarget.grna_start_index * 13">
+                <span class="base-box"
+                  *ngFor="let char of (selectedTarget.display_sgrna_seq || selectedTarget.sgrna_seq || '').split('')"
+                  style="font-size: 11px; font-weight: 800; color: #34495e; font-family: monospace;">{{ char }}</span>
               </div>
               <div style="position: absolute; font-size: 18px; bottom: -12px; color: #2c3e50; z-index: 25;"
-                   [style.left.px]="selectedTarget.cut_site_index * 13 - 9">✂</div>
+                [style.left.px]="selectedTarget.cut_site_index * 13 - 9">✂</div>
             </div>
             <!-- Reference bases -->
             <div class="seq-mono ref-seq" style="display: flex; height: 16px;">
               <span class="base-box text-box"
-                    *ngFor="let char of (selectedTarget.ref_sequence || '').split(''); let i = index"
-                    [style.color]="(selectedTarget.grna_start_index >= 0 && i >= selectedTarget.grna_start_index && i < selectedTarget.grna_start_index + (selectedTarget.sgrna_seq?.length || 0)) ? '#3498db' : '#333'"
-                    [style.font-weight]="(selectedTarget.grna_start_index >= 0 && i >= selectedTarget.grna_start_index && i < selectedTarget.grna_start_index + (selectedTarget.sgrna_seq?.length || 0)) ? 'bold' : 'normal'">
+                *ngFor="let char of (selectedTarget.ref_sequence || '').split(''); let i = index"
+                [style.color]="(selectedTarget.grna_start_index >= 0 && i >= selectedTarget.grna_start_index && i < selectedTarget.grna_start_index + (selectedTarget.sgrna_seq?.length || 0)) ? '#3498db' : '#333'"
+                [style.font-weight]="(selectedTarget.grna_start_index >= 0 && i >= selectedTarget.grna_start_index && i < selectedTarget.grna_start_index + (selectedTarget.sgrna_seq?.length || 0)) ? 'bold' : 'normal'">
                 {{ char }}
               </span>
             </div>
@@ -172,7 +180,7 @@
 
         <!-- Mutation Group Rows -->
         <div class="unified-row" *ngFor="let group of selectedTarget.top_groups"
-             style="border-bottom: 1px dotted #e0e0e0; background: white;">
+          style="border-bottom: 1px dotted #e0e0e0; background: white;">
           <div class="sticky-left">GROUP {{ group.group_rank }}</div>
           <div class="seq-center" style="padding: 10px 15px 23px 15px; display: flex; align-items: flex-start;">
             <div class="seq-mono read-seq" style="display: flex; height: 16px;">
@@ -192,8 +200,10 @@
           </div>
           <div class="sticky-right" style="display: flex; align-items: center; font-size: 11px;">
             <div style="line-height: 1.4;">
-              <strong>TYPE: {{ group.classification }}{{ group.net_indel ? ' (' + group.net_indel + ' bp)' : ' (0 bp)' }}</strong><br>
-              <span style="color:#7f8c8d;">{{ group.read_count | number }} Reads &nbsp;·&nbsp; {{ group.read_pct }}%</span>
+              <strong>TYPE: {{ group.classification }}{{ group.net_indel ? ' (' + group.net_indel + ' bp)' : ' (0 bp)'
+                }}</strong><br>
+              <span style="color:#7f8c8d;">{{ group.read_count | number }} Reads &nbsp;·&nbsp; {{ group.read_pct
+                }}%</span>
             </div>
           </div>
         </div>
@@ -207,12 +217,8 @@
     <div class="config-section">
 
       <!-- Upload Zone -->
-      <div class="upload-zone"
-           [class.dragging]="isDragging"
-           (drop)="onFileDropped($event)"
-           (dragover)="onDragOver($event)"
-           (dragleave)="onDragLeave($event)"
-           (click)="fileInput.click()">
+      <div class="upload-zone" [class.dragging]="isDragging" (drop)="onFileDropped($event)"
+        (dragover)="onDragOver($event)" (dragleave)="onDragLeave($event)" (click)="fileInput.click()">
         <input type="file" #fileInput (change)="onFileSelected($event)" multiple hidden accept=".fastq,.fq" />
         <div class="upload-icon">📁</div>
         <p><strong>Drag & Drop FASTQ files</strong> or click to browse</p>
@@ -264,21 +270,19 @@
       <!-- ── Parameters Row ── -->
       <div class="form-row secondary">
         <div class="form-group">
-          <label>Data Type:</label>
-          <select formControlName="dataType">
-            <option value="single-end">Single-end</option>
-            <option value="paired-end">Paired-end</option>
-          </select>
-        </div>
-        <div class="form-group">
           <label>Window Size (bp):</label>
           <input type="number" formControlName="interestRegion" min="60" max="120" placeholder="60-120"
-                 [class.invalid]="analysisForm.get('interestRegion')?.invalid && analysisForm.get('interestRegion')?.touched" />
-          <span class="hint-text">Total window centered at cut site</span>
+            [class.invalid]="analysisForm.get('interestRegion')?.invalid && analysisForm.get('interestRegion')?.touched" />
+
         </div>
         <div class="form-group">
           <label>Phred Threshold:</label>
           <input type="number" formControlName="phredThreshold" />
+        </div>
+        <div class="form-group">
+          <label>Assignment Margin (%):</label>
+          <input type="number" step="1" min="0" max="100" [(ngModel)]="assignmentMarginThreshold"
+            [ngModelOptions]="{standalone: true}" />
         </div>
         <div class="form-group">
           <label>Indel Threshold (%):</label>
@@ -293,28 +297,21 @@
         <div class="section-header">
           <h2>🧬 Reference Configuration</h2>
           <div class="header-actions">
-            <div class="margin-input-group">
-              <label>Assignment Margin:</label>
-              <input type="number" step="0.01" min="0" max="1"
-                     [(ngModel)]="assignmentMarginThreshold"
-                     [ngModelOptions]="{standalone: true}" />
-            </div>
             <button type="button" class="btn-add" (click)="addGene()">+ Add Gene</button>
           </div>
         </div>
 
         <div formArrayName="genes">
-          <div *ngFor="let gene of geneBlocks.controls; let gi = index"
-               [formGroupName]="gi" class="gene-block-card">
+          <div *ngFor="let gene of geneBlocks.controls; let gi = index" [formGroupName]="gi" class="gene-block-card">
 
             <!-- Gene header -->
             <div class="gene-block-header">
               <div class="gene-block-title">
                 <span class="gene-block-icon">🧬</span>
-                <span>Gene #{{ gi + 1 }}</span>
+                <span>G{{ gi + 1 }}</span>
               </div>
               <button type="button" class="btn-remove-target" (click)="removeGene(gi)"
-                      *ngIf="geneBlocks.length > 1">Remove Gene</button>
+                *ngIf="geneBlocks.length > 1">Remove Gene</button>
             </div>
 
             <div class="gene-block-body">
@@ -323,13 +320,13 @@
                 <div class="form-group" style="flex:0 0 200px;">
                   <label>Gene Name:</label>
                   <input type="text" formControlName="gene_name" placeholder="e.g. GeneA"
-                         [class.invalid]="gene.get('gene_name')?.invalid && gene.get('gene_name')?.touched" />
+                    [class.invalid]="gene.get('gene_name')?.invalid && gene.get('gene_name')?.touched" />
                 </div>
                 <div class="form-group full">
                   <label>Reference Sequence:</label>
                   <textarea formControlName="gene_reference" rows="3" class="monospaced"
-                            placeholder="Complete reference sequence for this gene"
-                            [class.invalid]="gene.get('gene_reference')?.invalid && gene.get('gene_reference')?.touched"></textarea>
+                    placeholder="Complete reference sequence for this gene"
+                    [class.invalid]="gene.get('gene_reference')?.invalid && gene.get('gene_reference')?.touched"></textarea>
                 </div>
               </div>
 
@@ -341,21 +338,21 @@
                 </div>
 
                 <div formArrayName="geneTargets">
-                  <div *ngFor="let gt of getGeneTargets(gi).controls; let ti = index"
-                       [formGroupName]="ti" class="gene-target-row">
+                  <div *ngFor="let gt of getGeneTargets(gi).controls; let ti = index" [formGroupName]="ti"
+                    class="gene-target-row">
                     <span class="gene-target-num">T{{ ti + 1 }}</span>
                     <div class="form-group" style="flex:0 0 180px;">
                       <label>Target Name:</label>
                       <input type="text" formControlName="target_id" placeholder="e.g. Site1"
-                             [class.invalid]="gt.get('target_id')?.invalid && gt.get('target_id')?.touched" />
+                        [class.invalid]="gt.get('target_id')?.invalid && gt.get('target_id')?.touched" />
                     </div>
                     <div class="form-group" style="flex:1;">
                       <label>gRNA Sequence:</label>
                       <input type="text" formControlName="gRNA" placeholder="20bp gRNA"
-                             [class.invalid]="gt.get('gRNA')?.invalid && gt.get('gRNA')?.touched" />
+                        [class.invalid]="gt.get('gRNA')?.invalid && gt.get('gRNA')?.touched" />
                     </div>
                     <button type="button" class="btn-remove" (click)="removeGeneTarget(gi, ti)"
-                            *ngIf="getGeneTargets(gi).length > 1" style="margin-top:20px;">&times;</button>
+                      *ngIf="getGeneTargets(gi).length > 1" style="margin-top:20px;">&times;</button>
                   </div>
                 </div>
               </div>
@@ -365,9 +362,7 @@
         </div>
       </div>
 
-      <button type="submit"
-              [disabled]="isLoading || (selectedFiles.length === 0)"
-              class="btn-primary">
+      <button type="submit" [disabled]="isLoading || (selectedFiles.length === 0)" class="btn-primary">
         {{ isLoading ? 'Analysis in Progress…' : 'Start CRISPR Analysis' }}
       </button>
     </div>
@@ -385,7 +380,8 @@
 
     <div class="bench-header">
       <h2>📐 Classification Benchmark</h2>
-      <p class="bench-subtitle">Evaluate read-to-(gene, target) classification accuracy on train and test subsets. This workflow does <strong>not</strong> compute CRISPR editing metrics.</p>
+      <p class="bench-subtitle">Evaluate read-to-(gene, target) classification accuracy on train and test subsets. This
+        workflow does <strong>not</strong> compute CRISPR editing metrics.</p>
     </div>
 
     <!-- ── Parameters ──────────────────────────────────────────────── -->
@@ -403,8 +399,8 @@
           <span class="hint-text">Region centred at cut site</span>
         </div>
         <div class="bench-param-group">
-          <label>Assignment Margin</label>
-          <input type="number" [(ngModel)]="benchMargin" step="0.01" min="0" max="1" />
+          <label>Assignment Margin (%)</label>
+          <input type="number" [(ngModel)]="benchMargin" step="1" min="0" max="100" />
           <span class="hint-text">top1 − top2 threshold</span>
         </div>
       </div>
@@ -414,78 +410,67 @@
     <div class="bench-dataset-card">
       <div class="bench-dataset-header">
         <h3>📂 Source Dataset</h3>
-        <button class="btn-add" (click)="addBenchRow()">+ Add Row</button>
+        <button class="btn-add-small" (click)="addBenchRow()">+ Add Row</button>
       </div>
 
-      <!-- Column headers -->
-      <div class="bench-table-head">
-        <span>FASTQ File</span>
-        <span>Gene Name</span>
-        <span>Target Name</span>
-        <span>Reference Sequence</span>
-        <span>gRNA Sequence</span>
-        <span></span>
-      </div>
-
-      <!-- Data rows -->
-      <div class="bench-row" *ngFor="let row of benchRows; let i = index">
-
-        <!-- FASTQ upload -->
-        <div class="bench-cell">
-          <label class="bench-file-label" [class.has-file]="row.file" [for]="'bfq_' + i">
-            {{ row.file ? row.file.name : '📁 Choose .fastq' }}
-          </label>
-          <input type="file" [id]="'bfq_' + i"
-                 accept=".fastq,.fq"
-                 (change)="onBenchFileSelected($event, i)" hidden />
+      <div class="bench-dataset-content">
+        <!-- Column headers -->
+        <div class="bench-table-head">
+          <span>FASTQ File</span>
+          <span>Gene Name</span>
+          <span>Target Name</span>
+          <span>Reference Sequence</span>
+          <span>gRNA Sequence</span>
+          <span></span>
         </div>
 
-        <!-- Gene name -->
-        <div class="bench-cell">
-          <input type="text" [(ngModel)]="row.geneName" placeholder="e.g. GeneA"
-                 class="bench-input" />
-        </div>
+        <!-- Data rows -->
+        <div class="bench-row" *ngFor="let row of benchRows; let i = index">
+          <!-- FASTQ upload -->
+          <div class="bench-cell">
+            <label class="bench-file-label" [class.has-file]="row.file" [for]="'bfq_' + i">
+              {{ row.file ? row.file.name : '📁 Choose .fastq' }}
+            </label>
+            <input type="file" [id]="'bfq_' + i" accept=".fastq,.fq" (change)="onBenchFileSelected($event, i)" hidden />
+          </div>
 
-        <!-- Target name -->
-        <div class="bench-cell">
-          <input type="text" [(ngModel)]="row.targetName" placeholder="e.g. Site1"
-                 class="bench-input" />
-        </div>
+          <!-- Gene name -->
+          <div class="bench-cell">
+            <input type="text" [(ngModel)]="row.geneName" placeholder="e.g. GeneA" class="bench-input" />
+          </div>
 
-        <!-- Reference sequence -->
-        <div class="bench-cell">
-          <textarea [(ngModel)]="row.referenceSequence"
-                    class="bench-input bench-textarea"
-                    placeholder="Full reference sequence"
-                    rows="2"></textarea>
-        </div>
+          <!-- Target name -->
+          <div class="bench-cell">
+            <input type="text" [(ngModel)]="row.targetName" placeholder="e.g. Site1" class="bench-input" />
+          </div>
 
-        <!-- gRNA -->
-        <div class="bench-cell">
-          <input type="text" [(ngModel)]="row.grnaSequence"
-                 placeholder="20bp gRNA"
-                 class="bench-input" />
-        </div>
+          <!-- Reference sequence -->
+          <div class="bench-cell">
+            <textarea [(ngModel)]="row.referenceSequence" class="bench-input bench-textarea"
+              placeholder="Full reference sequence" rows="2"></textarea>
+          </div>
 
-        <!-- Remove -->
-        <div class="bench-cell bench-cell-action">
-          <button class="btn-remove" (click)="removeBenchRow(i)"
-                  *ngIf="benchRows.length > 1">&times;</button>
+          <!-- gRNA -->
+          <div class="bench-cell">
+            <input type="text" [(ngModel)]="row.grnaSequence" placeholder="20bp gRNA" class="bench-input" />
+          </div>
+
+          <!-- Remove -->
+          <div class="bench-cell bench-cell-action">
+            <button class="btn-remove" (click)="removeBenchRow(i)" *ngIf="benchRows.length > 1">&times;</button>
+          </div>
         </div>
       </div>
     </div>
 
     <!-- ── Action Buttons ──────────────────────────────────────────────── -->
     <div class="bench-actions">
-      <button class="btn-bench btn-bench-split"
-              (click)="buildSplitPreview()"
-              [disabled]="benchIsLoading">🔀 Build Train/Test Split</button>
-      <button class="btn-bench btn-bench-train"
-              (click)="runTrainBenchmark()"
-              [disabled]="benchIsLoading">▶ Run Train Benchmark</button>
-      <button class="btn-bench btn-bench-test"
-              (click)="runTestBenchmark()"
-              [disabled]="benchIsLoading">▶ Run Test Benchmark</button>
+      <button class="btn-bench btn-bench-split" (click)="buildSplitPreview()" [disabled]="benchIsLoading">🔀 Build
+        Train/Test Split</button>
+      <button class="btn-bench btn-bench-train" (click)="runTrainBenchmark()" [disabled]="benchIsLoading">▶ Run Train
+        Benchmark</button>
+      <button class="btn-bench btn-bench-test" (click)="runTestBenchmark()" [disabled]="benchIsLoading">▶ Run Test
+        Benchmark</button>
     </div>
 
     <!-- ── Progress ─────────────────────────────────────────────────── -->
@@ -507,23 +492,26 @@
       <h3>🔀 Train / Test Split Preview</h3>
       <div class="bench-split-totals">
         <div class="bench-split-badge train">Train set: {{ splitPreview.train_count | number }} reads</div>
-        <div class="bench-split-badge test" >Test set:  {{ splitPreview.test_count  | number }} reads</div>
-        <div class="bench-split-badge total">Total:     {{ splitPreview.total      | number }} reads</div>
+        <div class="bench-split-badge test">Test set: {{ splitPreview.test_count | number }} reads</div>
+        <div class="bench-split-badge total">Total: {{ splitPreview.total | number }} reads</div>
       </div>
       <table class="bench-table">
         <thead>
           <tr>
-            <th>Gene Name</th><th>Target Name</th>
-            <th>Total</th><th>Train (80%)</th><th>Test (20%)</th>
+            <th>Gene Name</th>
+            <th>Target Name</th>
+            <th>Total</th>
+            <th>Train (80%)</th>
+            <th>Test (20%)</th>
           </tr>
         </thead>
         <tbody>
           <tr *ngFor="let row of splitPreview.rows">
             <td>{{ row.gene }}</td>
             <td><span class="badge">{{ row.target }}</span></td>
-            <td>{{ row.total       | number }}</td>
+            <td>{{ row.total | number }}</td>
             <td>{{ row.train_count | number }}</td>
-            <td>{{ row.test_count  | number }}</td>
+            <td>{{ row.test_count | number }}</td>
           </tr>
         </tbody>
       </table>
@@ -554,14 +542,14 @@
         </div>
         <div class="bench-usability-info">
           <div class="bu-main">
-            Usability: <strong>{{ trainResult.usable_rate }}%</strong> 
+            Usability: <strong>{{ trainResult.usable_rate }}%</strong>
             ({{ trainResult.usable_reads | number }} / {{ trainResult.total_reads | number }})
           </div>
           <div class="bu-breakdown">
-            Filtered out: {{ trainResult.filtered_out | number }} 
-            (Anchors: {{ trainResult.fail_no_anchor | number }}, 
-             Quality: {{ trainResult.fail_quality | number }}, 
-             Similarity: {{ trainResult.fail_similarity | number }})
+            Filtered out: {{ trainResult.filtered_out | number }}
+            (Anchors: {{ trainResult.fail_no_anchor | number }},
+            Quality: {{ trainResult.fail_quality | number }},
+            Similarity: {{ trainResult.fail_similarity | number }})
           </div>
         </div>
 
@@ -572,16 +560,23 @@
         <!-- Per-class breakdown -->
         <table class="bench-table">
           <thead>
-            <tr><th>Gene Name</th><th>Target Name</th><th>Total</th>
-              <th>Correct</th><th>Wrong</th><th>Ambiguous</th><th>Acc %</th></tr>
+            <tr>
+              <th>Gene Name</th>
+              <th>Target Name</th>
+              <th>Total</th>
+              <th>Correct</th>
+              <th>Wrong</th>
+              <th>Ambiguous</th>
+              <th>Acc %</th>
+            </tr>
           </thead>
           <tbody>
             <tr *ngFor="let c of trainResult.per_class">
               <td>{{ c.gene }}</td>
               <td><span class="badge">{{ c.target }}</span></td>
-              <td>{{ c.total     | number }}</td>
-              <td class="td-correct">{{ c.correct   | number }}</td>
-              <td class="td-wrong">{{ c.wrong     | number }}</td>
+              <td>{{ c.total | number }}</td>
+              <td class="td-correct">{{ c.correct | number }}</td>
+              <td class="td-wrong">{{ c.wrong | number }}</td>
               <td class="td-ambig">{{ c.ambiguous | number }}</td>
               <td><strong>{{ c.correct_rate }}%</strong></td>
             </tr>
@@ -593,15 +588,23 @@
           <summary>🔍 Derived Cut Sites</summary>
           <table class="bench-table">
             <thead>
-              <tr><th>Gene Name</th><th>Target Name</th><th>Strand</th>
-                <th>Cut</th><th>gRNA start</th><th>gRNA end</th>
-                <th>PAM</th><th>PAM found</th></tr>
+              <tr>
+                <th>Gene Name</th>
+                <th>Target Name</th>
+                <th>Strand</th>
+                <th>Cut</th>
+                <th>gRNA start</th>
+                <th>gRNA end</th>
+                <th>PAM</th>
+                <th>PAM found</th>
+              </tr>
             </thead>
             <tbody>
               <tr *ngFor="let cs of trainResult.cut_sites">
                 <td>{{ cs.gene }}</td>
                 <td><span class="badge">{{ cs.target }}</span></td>
-                <td><span class="strand-badge" [class.fwd]="cs.strand === 'forward'" [class.rev]="cs.strand === 'reverse'">{{ cs.strand }}</span></td>
+                <td><span class="strand-badge" [class.fwd]="cs.strand === 'forward'"
+                    [class.rev]="cs.strand === 'reverse'">{{ cs.strand }}</span></td>
                 <td>{{ cs.cut_site }}</td>
                 <td>{{ cs.grna_start }}</td>
                 <td>{{ cs.grna_end }}</td>
@@ -635,14 +638,14 @@
         </div>
         <div class="bench-usability-info">
           <div class="bu-main">
-            Usability: <strong>{{ testResult.usable_rate }}%</strong> 
+            Usability: <strong>{{ testResult.usable_rate }}%</strong>
             ({{ testResult.usable_reads | number }} / {{ testResult.total_reads | number }})
           </div>
           <div class="bu-breakdown">
-            Filtered out: {{ testResult.filtered_out | number }} 
-            (Anchors: {{ testResult.fail_no_anchor | number }}, 
-             Quality: {{ testResult.fail_quality | number }}, 
-             Similarity: {{ testResult.fail_similarity | number }})
+            Filtered out: {{ testResult.filtered_out | number }}
+            (Anchors: {{ testResult.fail_no_anchor | number }},
+            Quality: {{ testResult.fail_quality | number }},
+            Similarity: {{ testResult.fail_similarity | number }})
           </div>
         </div>
 
@@ -652,16 +655,23 @@
 
         <table class="bench-table">
           <thead>
-            <tr><th>Gene Name</th><th>Target Name</th><th>Total</th>
-              <th>Correct</th><th>Wrong</th><th>Ambiguous</th><th>Acc %</th></tr>
+            <tr>
+              <th>Gene Name</th>
+              <th>Target Name</th>
+              <th>Total</th>
+              <th>Correct</th>
+              <th>Wrong</th>
+              <th>Ambiguous</th>
+              <th>Acc %</th>
+            </tr>
           </thead>
           <tbody>
             <tr *ngFor="let c of testResult.per_class">
               <td>{{ c.gene }}</td>
               <td><span class="badge">{{ c.target }}</span></td>
-              <td>{{ c.total     | number }}</td>
-              <td class="td-correct">{{ c.correct   | number }}</td>
-              <td class="td-wrong">{{ c.wrong     | number }}</td>
+              <td>{{ c.total | number }}</td>
+              <td class="td-correct">{{ c.correct | number }}</td>
+              <td class="td-wrong">{{ c.wrong | number }}</td>
               <td class="td-ambig">{{ c.ambiguous | number }}</td>
               <td><strong>{{ c.correct_rate }}%</strong></td>
             </tr>
@@ -672,15 +682,23 @@
           <summary>🔍 Derived Cut Sites</summary>
           <table class="bench-table">
             <thead>
-              <tr><th>Gene Name</th><th>Target Name</th><th>Strand</th>
-                <th>Cut</th><th>gRNA start</th><th>gRNA end</th>
-                <th>PAM</th><th>PAM found</th></tr>
+              <tr>
+                <th>Gene Name</th>
+                <th>Target Name</th>
+                <th>Strand</th>
+                <th>Cut</th>
+                <th>gRNA start</th>
+                <th>gRNA end</th>
+                <th>PAM</th>
+                <th>PAM found</th>
+              </tr>
             </thead>
             <tbody>
               <tr *ngFor="let cs of testResult.cut_sites">
                 <td>{{ cs.gene }}</td>
                 <td><span class="badge">{{ cs.target }}</span></td>
-                <td><span class="strand-badge" [class.fwd]="cs.strand === 'forward'" [class.rev]="cs.strand === 'reverse'">{{ cs.strand }}</span></td>
+                <td><span class="strand-badge" [class.fwd]="cs.strand === 'forward'"
+                    [class.rev]="cs.strand === 'reverse'">{{ cs.strand }}</span></td>
                 <td>{{ cs.cut_site }}</td>
                 <td>{{ cs.grna_start }}</td>
                 <td>{{ cs.grna_end }}</td>
