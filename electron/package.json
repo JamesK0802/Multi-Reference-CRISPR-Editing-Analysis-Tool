@@ -1,6 +1,6 @@
 {
   "name": "electron",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "CRISPR Analysis Tool",
   "main": "main.js",
   "scripts": {
@@ -54,7 +54,7 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "public/icon.ico"
+      "icon": "public/icon.png"
     },
     "mac": {
       "target": [
@@ -62,7 +62,7 @@
         "zip"
       ],
       "category": "public.app-category.science",
-      "icon": "public/icon.icns"
+      "icon": "public/icon.png"
     }
   }
 }

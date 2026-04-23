@@ -10,4 +10,4 @@ from api import app
 if __name__ == "__main__":
     # Start the FastAPI server using uvicorn
     # log_level="info" ensures we see startup logs in Electron
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info", workers=1)
+    uvicorn.run("api:app", host="127.0.0.1", port=8000, log_level="info", reload=False)

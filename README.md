@@ -68,11 +68,13 @@ The CRISPR Editing Analysis Tool is a high-performance analysis pipeline designe
 
 ## Version History
 
-### v1.3.0 (2026-04-23)
+### v1.3.0 - Desktop Stable (2026-04-23)
 - **New Feature**: **Analyze Ambiguous Reads** toggle added. Allows secondary class-specific analysis on the unassigned read pool.
-- **Algorithm**: Redesigned "All Merged" logic to aggregate raw counts and recalculate all biological metrics (%, efficiency) globally.
-- **UI**: Added specialized reddish styling for ambiguous-derived tabs and a custom toggle control.
-- **Deployment**: Integrated Electron for standalone desktop use; bundled backend binary for easier distribution.
+- **Algorithm**: Overhauled **"All Merged"** data logic—now aggregates raw counts across all files and recalculates biological metrics (%, efficiency) for true global statistics.
+- **Bug Fix (Critical)**: Resolved `0 Unknown Error` on macOS by enforcing `127.0.0.1` IP-based communication between Electron and the bundled FastAPI backend.
+- **Stability**: Refactored backend entry point for `PyInstaller` compatibility using string-based uvicorn app references.
+- **UI**: Integrated high-resolution **Premium App Icon**; added specialized reddish styling for ambiguous-derived results.
+- **Deployment**: Full Electron desktop packaging (v1.1.0) with bundled backend binary.
 
 ### v1.2.0 (2026-04-22)
 - **New Feature**: Added top-level **Result Scope Tabs** (Merged vs Per-File).

@@ -32,7 +32,7 @@ function waitForBackend(callback, retries = 30) {
 function startBackend() {
   const isWin = process.platform === 'win32';
   const isPackaged = app.isPackaged;
-  
+
   let cmd;
   let args;
   let backendDir;
@@ -40,22 +40,22 @@ function startBackend() {
   if (isPackaged) {
     // ── Packaged Mode: Run standalone executable ─────────────────────────────
     backendDir = path.join(process.resourcesPath, 'backend');
-    cmd = isWin 
+    cmd = isWin
       ? path.join(backendDir, 'backend-api.exe')
       : path.join(backendDir, 'backend-api');
-    args = ['--port', '8000'];
-    
+    args = [];
+
     console.log(`[Electron] Starting standalone backend: ${cmd}`);
   } else {
     // ── Dev Mode: Run via Python interpreter ────────────────────────────────
     backendDir = path.join(__dirname, '..', 'crispr_backend');
-    const venvPath = isWin 
+    const venvPath = isWin
       ? path.join(backendDir, 'venv', 'Scripts', 'python.exe')
       : path.join(backendDir, 'venv', 'bin', 'python3');
-    
+
     cmd = fs.existsSync(venvPath) ? venvPath : (isWin ? 'python' : 'python3');
     args = ['-m', 'uvicorn', 'api:app', '--port', '8000'];
-    
+
     console.log(`[Electron] Starting Dev backend using: ${cmd}`);
   }
 
@@ -119,7 +119,7 @@ function createWindow() {
    */
   if (!app.isPackaged) {
     // Optionally toggle this to false to test built files locally:
-    const testBuiltFiles = true; 
+    const testBuiltFiles = true;
     if (testBuiltFiles) {
       win.loadFile(path.join(__dirname, '..', 'crispr-frontend', 'dist', 'crispr-frontend', 'browser', 'index.html'));
     } else {
