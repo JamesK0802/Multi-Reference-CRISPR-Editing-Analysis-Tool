@@ -35,8 +35,19 @@
     <!-- ── Gene Tabs (Multi-Reference only) ── -->
     <div *ngIf="genes.length >= 1" class="gene-tabs-wrapper">
       <div class="gene-tabs" role="tablist">
-        <button *ngFor="let g of genes; let i = index" role="tab" class="gene-tab-btn"
-          [class.active]="i === selectedGeneIndex" [id]="'gene-tab-' + i" (click)="selectGene(i)">
+        <!-- Normal Tabs (Left-aligned) -->
+        <button *ngFor="let g of normalGenes; let i = index" role="tab" class="gene-tab-btn"
+          [class.active]="genes.indexOf(g) === selectedGeneIndex" (click)="selectGene(genes.indexOf(g))">
+          <span class="gene-tab-label">{{ g.gene }}</span>
+          <span class="gene-tab-count">{{ g.assigned_read_count | number }} reads</span>
+        </button>
+
+        <!-- Dynamic Spacer to push ambiguous tabs to the right -->
+        <div class="flex-spacer"></div>
+
+        <!-- Ambiguous Tabs (Right-aligned) -->
+        <button *ngFor="let g of ambiguousGenes; let i = index" role="tab" class="gene-tab-btn ambiguous-derived"
+          [class.active]="genes.indexOf(g) === selectedGeneIndex" (click)="selectGene(genes.indexOf(g))">
           <span class="gene-tab-label">{{ g.gene }}</span>
           <span class="gene-tab-count">{{ g.assigned_read_count | number }} reads</span>
         </button>
@@ -287,6 +298,13 @@
         <div class="form-group">
           <label>Indel Threshold (%):</label>
           <input type="number" step="0.1" formControlName="indelThreshold" />
+        </div>
+        <div class="form-group toggle-group">
+          <label>Analyze Ambiguous Reads:</label>
+          <div class="toggle-control">
+            <input type="checkbox" formControlName="analyzeAmbiguous" id="ambiguousToggle" />
+            <label for="ambiguousToggle" class="toggle-label"></label>
+          </div>
         </div>
       </div>
 

@@ -1,0 +1,68 @@
+{
+  "name": "electron",
+  "version": "1.0.1",
+  "description": "CRISPR Analysis Tool",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac"
+  },
+  "keywords": [],
+  "author": "James Kim",
+  "license": "ISC",
+  "dependencies": {
+    "electron-updater": "^6.1.7"
+  },
+  "devDependencies": {
+    "electron": "^41.2.2",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.crispr.analysis.tool",
+    "productName": "CRISPR Analysis Tool",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "JamesK0802",
+        "repo": "Multi-Reference-CRISPR-Editing-Analysis-Tool"
+      }
+    ],
+    "directories": {
+      "output": "dist-packaged"
+    },
+    "files": [
+      "main.js",
+      "package.json",
+      {
+        "from": "dist/frontend/browser",
+        "to": "dist",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "extraResources": [
+      {
+        "from": "backend-bin",
+        "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "public/icon.ico"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.science",
+      "icon": "public/icon.icns"
+    }
+  }
+}

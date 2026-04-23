@@ -21,3 +21,12 @@ __pycache__/
 .idea/
 *.swp
 *.swo
+
+# Build Artifacts & Binaries
+dist/
+build/
+backend-bin/
+dist-packaged/
+*.spec
+bin/
+obj/

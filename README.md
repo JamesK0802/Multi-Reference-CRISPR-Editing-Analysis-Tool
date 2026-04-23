@@ -6,7 +6,9 @@ The CRISPR Editing Analysis Tool is a high-performance analysis pipeline designe
 
 ## Key Features
 
-- **📂 Multi-File Result Scoping (v1.2.0)**: Switch between "All Merged" view and individual per-file analysis directly in the results dashboard.
+- **📂 Multi-File Result Scoping**: Switch between "All Merged" view and individual per-file analysis directly in the results dashboard.
+- **🧪 Analyze Ambiguous Reads (v1.3.0)**: Optional secondary analysis that runs classification logic on unassigned reads, providing insights into class-specific patterns within the ambiguous pool.
+- **🖥️ Standalone Desktop App (v1.3.0)**: Integrated with Electron for cross-platform desktop usage with an embedded FastAPI backend.
 - **🧬 Unified Classification Core**: A shared k-mer scoring engine (`classifier.py`) powers both analysis and benchmarking, ensuring 100% statistical parity.
 - **📊 Classification Benchmark Tool**: Dedicated workflow to evaluate classification accuracy on train/test subsets with real-time performance metrics.
 - **🔍 Auto-Centering Annotation Grid**: Horizontally scrollable sequence viewport that automatically focuses on the gRNA and cut-site (scissors) for instant inspection.
@@ -15,8 +17,9 @@ The CRISPR Editing Analysis Tool is a high-performance analysis pipeline designe
 
 ## Tech Stack
 
-- **Backend**: Python 3.9+, [FastAPI](https://fastapi.tiangolo.com/), [Biopython](https://biopython.org/)
+- **Backend**: Python 3.9+, [FastAPI](https://fastapi.tiangolo.com/), [Biopython](https://biopython.org/), [PyInstaller](https://pyinstaller.org/)
 - **Frontend**: [Angular 21](https://angular.dev/), [Reactive Forms](https://angular.io/guide/reactive-forms), [Chart.js](https://www.chartjs.org/)
+- **Desktop**: [Electron](https://www.electronjs.org/), [electron-builder](https://www.electron.build/)
 - **Core Engine**: Custom demultiplexing logic + Needle-style alignment wrapper.
 
 ## Project Structure
@@ -64,6 +67,12 @@ The CRISPR Editing Analysis Tool is a high-performance analysis pipeline designe
 ---
 
 ## Version History
+
+### v1.3.0 (2026-04-23)
+- **New Feature**: **Analyze Ambiguous Reads** toggle added. Allows secondary class-specific analysis on the unassigned read pool.
+- **Algorithm**: Redesigned "All Merged" logic to aggregate raw counts and recalculate all biological metrics (%, efficiency) globally.
+- **UI**: Added specialized reddish styling for ambiguous-derived tabs and a custom toggle control.
+- **Deployment**: Integrated Electron for standalone desktop use; bundled backend binary for easier distribution.
 
 ### v1.2.0 (2026-04-22)
 - **New Feature**: Added top-level **Result Scope Tabs** (Merged vs Per-File).

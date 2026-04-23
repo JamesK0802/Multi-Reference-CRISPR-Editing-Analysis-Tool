@@ -61,6 +61,14 @@ export class App implements OnInit, OnDestroy {
     return this.genes.length > 0 ? this.genes[this.selectedGeneIndex] : null;
   }
 
+  get normalGenes(): GeneResult[] {
+    return this.genes.filter(g => !g.is_ambiguous_derived);
+  }
+
+  get ambiguousGenes(): GeneResult[] {
+    return this.genes.filter(g => g.is_ambiguous_derived);
+  }
+
   selectGene(index: number) {
     this.ngZone.run(() => {
       this.selectedGeneIndex = index;
@@ -218,6 +226,7 @@ export class App implements OnInit, OnDestroy {
       interestRegion: [90, [Validators.required, Validators.min(60), Validators.max(120)]],
       phredThreshold: [10],
       indelThreshold: [1.0],
+      analyzeAmbiguous: [false],
       genes: this.fb.array([this.createGeneGroup()])
     });
   }
@@ -355,6 +364,7 @@ export class App implements OnInit, OnDestroy {
         }))
       }));
       formData.append('targets', JSON.stringify(genesPayload));
+      formData.append('analyze_ambiguous', rawValue.analyzeAmbiguous ? 'true' : 'false');
       this.addLog(`Unified Analysis: ${genesPayload.length} gene(s), ${genesPayload.reduce((s: number, g: any) => s + g.targets.length, 0)} total target(s)`);
 
       this.analysisService.runAnalysis(formData).subscribe({
@@ -439,17 +449,70 @@ export class App implements OnInit, OnDestroy {
           for (const geneRes of (mrd.genes ?? [])) {
             if (geneMap.has(geneRes.gene)) {
               const existing = geneMap.get(geneRes.gene)!;
-              
-              // CRITICAL BUG FIX: If the new file result actually has analyzed reads for this gene,
-              // and the current 'existing' one is empty (or has fewer reads), update the analysis_result.
-              const newTotal = geneRes.analysis_result?.targets?.[0]?.summary?.total_reads ?? 0;
-              const curTotal = existing.analysis_result?.targets?.[0]?.summary?.total_reads ?? 0;
-              
-              if (newTotal > curTotal) {
-                existing.analysis_result = geneRes.analysis_result;
-              }
-              
               existing.assigned_read_count += geneRes.assigned_read_count;
+
+              // Merge Target Results (aggregate raw counts and recalculate %)
+              if (existing.analysis_result?.targets && geneRes.analysis_result?.targets) {
+                existing.analysis_result.targets.forEach((extT: any, tidx: number) => {
+                  const newT = geneRes.analysis_result.targets[tidx];
+                  if (!newT) return;
+
+                  const s1 = extT.summary;
+                  const s2 = newT.summary;
+
+                  // Derive counts from percentages to allow accurate merging
+                  const getCount = (sum: any, key: string) => Math.round(sum.aligned_reads * (sum[key] / 100));
+                  
+                  const s1_oof = getCount(s1, 'out_of_frame_pct');
+                  const s1_inf = getCount(s1, 'in_frame_pct');
+                  const s1_no  = getCount(s1, 'no_indel_pct');
+                  const s1_sub = getCount(s1, 'substitution_pct');
+
+                  const s2_oof = getCount(s2, 'out_of_frame_pct');
+                  const s2_inf = getCount(s2, 'in_frame_pct');
+                  const s2_no  = getCount(s2, 'no_indel_pct');
+                  const s2_sub = getCount(s2, 'substitution_pct');
+
+                  // Aggregate raw sums
+                  s1.total_reads   += s2.total_reads;
+                  s1.matched_reads += s2.matched_reads;
+                  s1.aligned_reads += s2.aligned_reads;
+                  s1.modified      += s2.modified;
+                  s1.unmodified    += s2.unmodified;
+
+                  const total_aligned = s1.aligned_reads || 1;
+                  const pct = (val: number) => Math.round((val / total_aligned) * 10000) / 100;
+
+                  // Recalculate percentages
+                  s1.out_of_frame_pct = pct(s1_oof + s2_oof);
+                  s1.in_frame_pct     = pct(s1_inf + s2_inf);
+                  s1.no_indel_pct     = pct(s1_no  + s2_no);
+                  s1.substitution_pct = pct(s1_sub + s2_sub);
+                  s1.editing_efficiency = Math.round(((s1.modified) / (s1.total_reads || 1)) * 10000) / 100;
+
+                  // Merge top_groups by read_inner (the sequence pattern)
+                  if (newT.top_groups && extT.top_groups) {
+                    const groupMap = new Map<string, any>();
+                    [...extT.top_groups, ...newT.top_groups].forEach(g => {
+                       if (groupMap.has(g.read_inner)) {
+                         const match = groupMap.get(g.read_inner);
+                         match.read_count += g.read_count;
+                       } else {
+                         groupMap.set(g.read_inner, { ...g });
+                       }
+                    });
+                    const mergedGroups = Array.from(groupMap.values())
+                      .sort((a,b) => b.read_count - a.read_count)
+                      .slice(0, 10);
+                    
+                    mergedGroups.forEach((g, i) => {
+                      g.group_rank = i + 1;
+                      g.read_pct = pct(g.read_count);
+                    });
+                    extT.top_groups = mergedGroups;
+                  }
+                });
+              }
             } else {
               // Deep copy to prevent reference issues
               geneMap.set(geneRes.gene, JSON.parse(JSON.stringify(geneRes)));

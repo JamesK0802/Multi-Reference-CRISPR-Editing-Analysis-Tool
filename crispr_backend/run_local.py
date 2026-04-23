@@ -288,7 +288,7 @@ def run_demultiplex(fastq_file, references, margin_threshold=0.05):
         "demultiplex_result": result
     }
 
-def run_multi_reference_analysis(fastq_file, genes_payload, assignment_margin_threshold=0.05, phred_threshold=10, indel_threshold=1.0):
+def run_multi_reference_analysis(fastq_file, genes_payload, assignment_margin_threshold=0.05, phred_threshold=10, indel_threshold=1.0, analyze_ambiguous=False):
     """
     Phase 2: Multi-reference assignment + per-gene CRISPR analysis.
     
@@ -377,7 +377,30 @@ def run_multi_reference_analysis(fastq_file, genes_payload, assignment_margin_th
             "assigned_reads_analyzed": assigned_count,
             "number_of_targets_analyzed": len(targets)
         })
+
+    # ── OPTIONAL: Analyze Ambiguous Reads separately for each class ──────────
+    if analyze_ambiguous and demux_result["ambiguous_reads"]:
+        print(f"  [MULTI_REF_ANALYSIS] Starting optional ambiguous-read analysis for each gene...")
+        ambiguous_reads_data = [(r["seq"], r["qual"]) for r in demux_result["ambiguous_reads"]]
         
+        for gene_payload in genes_payload:
+            gene_name = gene_payload["gene"]
+            targets = gene_payload.get("targets", [])
+            
+            # Re-use existing analysis pipeline on the ambiguous pool
+            # Results are isolated from regular classification
+            amb_analysis_targets = run_analysis_on_reads(ambiguous_reads_data, targets, phred_threshold, indel_threshold)
+            
+            output["genes"].append({
+                "gene": f"{gene_name}-ambiguous",
+                "assigned_read_count": len(ambiguous_reads_data),
+                "ambiguous_excluded": False, # This tab IS the ambiguous pool
+                "is_ambiguous_derived": True,
+                "analysis_result": {
+                    "targets": amb_analysis_targets
+                }
+            })
+            
     print(f"  [MULTI_REF_ANALYSIS] Returning multi-reference results grouped by gene.")
     return output
 
@@ -413,7 +436,7 @@ def process_files(file_paths, targets, data_type="single-end", phred_threshold=3
             
     return final_payload
 
-def process_files_multi(file_paths, genes_payload, data_type="single-end", phred_threshold=30, indel_threshold=1.0, margin_threshold=0.05, progress_callback=None):
+def process_files_multi(file_paths, genes_payload, data_type="single-end", phred_threshold=30, indel_threshold=1.0, margin_threshold=0.05, progress_callback=None, analyze_ambiguous=False):
     """
     Processes file paths for multi-reference analysis with fine-grained progress.
     Emits file / demux / gene / target level progress events.
@@ -506,16 +529,7 @@ def process_files_multi(file_paths, genes_payload, data_type="single-end", phred
                 if not t.get("reference_seq"):
                     t["reference_seq"] = gene_payload["sequence"]
 
-            target_range = gene_range / max(total_targets, 1)
-            target_results = []
-            for ti, target in enumerate(targets_for_gene):
-                if progress_callback:
-                    progress_callback(
-                        int(gene_pct_base + ti * target_range),
-                        f"Gene {gi+1}/{total_genes} ({gene_name}) | Target {ti+1}/{total_targets}: {target.get('target_id', '?')} (file {fi+1}/{total_files})"
-                    )
-                single = run_analysis_on_reads(gene_reads, [target], phred_threshold, indel_threshold)
-                target_results.extend(single)
+            target_results = run_analysis_on_reads(gene_reads, targets_for_gene, phred_threshold, indel_threshold)
 
             gene_output["genes"].append({
                 "gene": gene_name,
@@ -529,6 +543,28 @@ def process_files_multi(file_paths, genes_payload, data_type="single-end", phred
                 "assigned_reads_analyzed": len(gene_reads),
                 "number_of_targets_analyzed": total_targets
             })
+
+        # ── Step 5c: OPTIONAL: Analyze Ambiguous Reads separately for each class ──
+        if analyze_ambiguous and demux_result["ambiguous_reads"]:
+            print(f"  [PROCESS_FILES_MULTI] Optional ambiguous-read analysis enabled...")
+            amb_reads_data = [(r["seq"], r["qual"]) for r in demux_result["ambiguous_reads"]]
+            
+            for gene_payload in genes_payload:
+                g_name = gene_payload["gene"]
+                g_targets = gene_payload.get("targets", [])
+                for t in g_targets:
+                    if not t.get("reference_seq"):
+                        t["reference_seq"] = gene_payload["sequence"]
+
+                amb_results = run_analysis_on_reads(amb_reads_data, g_targets, phred_threshold, indel_threshold)
+                
+                gene_output["genes"].append({
+                    "gene": f"{g_name}-ambiguous",
+                    "assigned_read_count": len(amb_reads_data),
+                    "ambiguous_excluded": False,
+                    "is_ambiguous_derived": True,
+                    "analysis_result": {"targets": amb_results}
+                })
 
         final_payload["results"].append({
             "fastq_file": filepath,

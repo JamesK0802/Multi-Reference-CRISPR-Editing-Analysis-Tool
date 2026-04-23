@@ -73,6 +73,7 @@ export interface GeneResult {
   gene: string;
   assigned_read_count: number;
   ambiguous_excluded: boolean;
+  is_ambiguous_derived?: boolean;
   analysis_result: {
     targets: TargetResult[];
   };

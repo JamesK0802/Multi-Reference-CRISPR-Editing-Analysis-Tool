@@ -143,6 +143,62 @@
   letter-spacing: 0.05em;
 }
 
+/* Custom Toggle Switch */
+.toggle-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toggle-control {
+  position: relative;
+  width: 50px;
+  height: 26px;
+}
+
+.toggle-control input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-label {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #cbd5e0;
+  transition: .4s;
+  border-radius: 34px;
+}
+
+.toggle-label:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  transition: .4s;
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+input:checked + .toggle-label {
+  background-color: #48bb78;
+}
+
+input:checked + .toggle-label:before {
+  transform: translateX(24px);
+}
+
+input:focus + .toggle-label {
+  box-shadow: 0 0 1px #48bb78;
+}
+
 .log-entry {
   font-family: 'Courier New', Courier, monospace;
   font-size: 0.75rem;
@@ -671,6 +727,11 @@ th, td {
   padding-bottom: 0;
   border-bottom: 2px solid #e0e6ed;
   margin-bottom: 0;
+  align-items: flex-end;
+}
+
+.flex-spacer {
+  flex: 1;
 }
 
 .gene-tab-btn {
@@ -703,6 +764,28 @@ th, td {
   color: #1a9e55;
   box-shadow: 0 -3px 0 0 #2ecc71 inset;
   z-index: 5;
+}
+
+/* Ambiguous tab specialized styling */
+.gene-tab-btn.ambiguous-derived {
+  background: #fdf2f2;
+  border-color: #f7dada;
+  color: #c53030;
+}
+
+.gene-tab-btn.ambiguous-derived.active {
+  background: white;
+  border-color: #e53e3e;
+  color: #c53030;
+  box-shadow: 0 -3px 0 0 #e53e3e inset;
+}
+
+.gene-tab-btn.ambiguous-derived .gene-tab-label {
+  color: #9b2c2c;
+}
+
+.gene-tab-btn.ambiguous-derived:not(.active) .gene-tab-count {
+  color: #e53e3e;
 }
 
 .gene-tab-label {
