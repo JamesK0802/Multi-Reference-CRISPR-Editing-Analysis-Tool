@@ -20,6 +20,7 @@ function waitForBackend(callback, retries = 30) {
 
   const req = http.get('http://127.0.0.1:8000/docs', (res) => {
     console.log('[Electron] Backend is ready. Opening window...');
+    isBackendReady = true;
     callback();
   });
 
@@ -182,8 +183,10 @@ app.on('window-all-closed', () => {
   }
 });
 
+let isBackendReady = false;
+
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
+  if (BrowserWindow.getAllWindows().length === 0 && isBackendReady) {
     createWindow();
   }
 });

@@ -36,7 +36,7 @@
       "main.js",
       "package.json",
       {
-        "from": "dist/frontend/browser",
+        "from": "dist",
         "to": "dist",
         "filter": [
           "**/*"
