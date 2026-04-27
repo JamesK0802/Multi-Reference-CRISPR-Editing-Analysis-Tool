@@ -62,7 +62,11 @@ export class App implements OnInit, OnDestroy {
   }
 
   get normalGenes(): GeneResult[] {
-    return this.genes.filter(g => !g.is_ambiguous_derived);
+    return this.genes.filter(g => !g.is_ambiguous_derived && !g.is_rescued_derived);
+  }
+
+  get rescuedGenes(): GeneResult[] {
+    return this.genes.filter(g => g.is_rescued_derived);
   }
 
   get ambiguousGenes(): GeneResult[] {
@@ -227,6 +231,7 @@ export class App implements OnInit, OnDestroy {
       phredThreshold: [10],
       indelThreshold: [1.0],
       analyzeAmbiguous: [false],
+      rescueAmbiguous: [false],
       genes: this.fb.array([this.createGeneGroup()])
     });
   }
@@ -365,6 +370,7 @@ export class App implements OnInit, OnDestroy {
       }));
       formData.append('targets', JSON.stringify(genesPayload));
       formData.append('analyze_ambiguous', rawValue.analyzeAmbiguous ? 'true' : 'false');
+      formData.append('rescue_ambiguous', rawValue.rescueAmbiguous ? 'true' : 'false');
       this.addLog(`Unified Analysis: ${genesPayload.length} gene(s), ${genesPayload.reduce((s: number, g: any) => s + g.targets.length, 0)} total target(s)`);
 
       this.analysisService.runAnalysis(formData).subscribe({
@@ -530,8 +536,14 @@ export class App implements OnInit, OnDestroy {
 
         this.refreshDashboard();
         this.setProgress(100, 'Analysis Complete ✓');
-        this.isLoading = false;
-        this.cdr.detectChanges();
+        
+        // Give the progress bar time to animate to 100% before hiding it
+        setTimeout(() => {
+          this.ngZone.run(() => {
+            this.isLoading = false;
+            this.cdr.detectChanges();
+          });
+        }, 800);
 
         setTimeout(() => {
           const el = document.getElementById('resultsSection');

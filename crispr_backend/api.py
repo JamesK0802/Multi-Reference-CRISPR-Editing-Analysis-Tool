@@ -47,7 +47,8 @@ def background_analysis(
     indel_threshold: float,
     is_multi_reference: bool = False,
     margin_threshold: float = 0.05,
-    analyze_ambiguous: bool = False
+    analyze_ambiguous: bool = False,
+    rescue_ambiguous: bool = False
 ):
     print(f"[DEBUG] Background thread started for task {task_id}")
     try:
@@ -65,7 +66,8 @@ def background_analysis(
                 indel_threshold=indel_threshold,
                 margin_threshold=margin_threshold,
                 progress_callback=update_progress,
-                analyze_ambiguous=analyze_ambiguous
+                analyze_ambiguous=analyze_ambiguous,
+                rescue_ambiguous=rescue_ambiguous
             )
         else:
             results = process_files(
@@ -100,7 +102,8 @@ async def run_analysis_endpoint(
     targets: str = Form(...),
     is_multi_reference: bool = Form(False),
     assignment_margin_threshold: float = Form(0.05),
-    analyze_ambiguous: bool = Form(False)
+    analyze_ambiguous: bool = Form(False),
+    rescue_ambiguous: bool = Form(False)
 ):
     clamped_interest = max(60, min(120, interest_region))
     print(f"[DEBUG] /analyze — files: {len(files)}, multi_ref: {is_multi_reference}")
@@ -138,7 +141,8 @@ async def run_analysis_endpoint(
             indel_threshold,
             is_multi_reference,
             assignment_margin_threshold,
-            analyze_ambiguous
+            analyze_ambiguous,
+            rescue_ambiguous
         )
         return {"task_id": task_id}
 

@@ -436,7 +436,7 @@ def process_files(file_paths, targets, data_type="single-end", phred_threshold=3
             
     return final_payload
 
-def process_files_multi(file_paths, genes_payload, data_type="single-end", phred_threshold=30, indel_threshold=1.0, margin_threshold=0.05, progress_callback=None, analyze_ambiguous=False):
+def process_files_multi(file_paths, genes_payload, data_type="single-end", phred_threshold=30, indel_threshold=1.0, margin_threshold=0.05, progress_callback=None, analyze_ambiguous=False, rescue_ambiguous=False):
     """
     Processes file paths for multi-reference analysis with fine-grained progress.
     Emits file / demux / gene / target level progress events.
@@ -549,22 +549,113 @@ def process_files_multi(file_paths, genes_payload, data_type="single-end", phred
             print(f"  [PROCESS_FILES_MULTI] Optional ambiguous-read analysis enabled...")
             amb_reads_data = [(r["seq"], r["qual"]) for r in demux_result["ambiguous_reads"]]
             
-            for gene_payload in genes_payload:
-                g_name = gene_payload["gene"]
-                g_targets = gene_payload.get("targets", [])
-                for t in g_targets:
-                    if not t.get("reference_seq"):
-                        t["reference_seq"] = gene_payload["sequence"]
-
-                amb_results = run_analysis_on_reads(amb_reads_data, g_targets, phred_threshold, indel_threshold)
+            if rescue_ambiguous:
+                print(f"  [PROCESS_FILES_MULTI] Running robust k-mer rescue clustering...")
                 
-                gene_output["genes"].append({
-                    "gene": f"{g_name}-ambiguous",
-                    "assigned_read_count": len(amb_reads_data),
-                    "ambiguous_excluded": False,
-                    "is_ambiguous_derived": True,
-                    "analysis_result": {"targets": amb_results}
-                })
+                def get_kmers(s, k=10):
+                    return set(s[i:i+k] for i in range(len(s)-k+1)) if len(s) >= k else set()
+                
+                clusters = [] # list of (kmers, representative_seq, rep_qual, [reads])
+                for r in amb_reads_data:
+                    seq = r[0]
+                    qual = r[1]
+                    kmers = get_kmers(seq)
+                    if not kmers:
+                        continue
+                    found = False
+                    for c in clusters:
+                        rep_kmers = c[0]
+                        intersection = len(kmers & rep_kmers)
+                        sim = intersection / max(len(kmers), 1)
+                        if sim >= 0.65: # ~65% k-mer overlap roughly corresponds to 85% sequence identity
+                            c[3].append(r)
+                            found = True
+                            break
+                    if not found:
+                        clusters.append((kmers, seq, qual, [r]))
+                
+                rescued_by_class = {g["gene"]: [] for g in genes_payload}
+                unresolved_reads = []
+                
+                classifier_classes = []
+                for g in genes_payload:
+                    for t in g.get("targets", []):
+                        cut_info = classifier.find_grna_cut_site(g["sequence"], t["sgrna_seq"])
+                        win_size = t.get("window_size", 90)
+                        ref_win = classifier.extract_window(g["sequence"], cut_info["cut_site"], win_size)
+                        classifier_classes.append({
+                            "gene": g["gene"],
+                            "target": t.get("target_id", ""),
+                            "ref_window": ref_win
+                        })
+                
+                for c in clusters:
+                    cluster_reads = c[3]
+                    if len(cluster_reads) < 3:
+                        unresolved_reads.extend(cluster_reads)
+                        continue
+                        
+                    representative = c[1]
+                    rep_qual = c[2]
+                    
+                    best_score = -1.0
+                    best_class = None
+                    
+                    for c in classifier_classes:
+                        usable, _, _ = classifier.is_read_usable(representative, rep_qual, c["ref_window"], phred_threshold)
+                        if usable:
+                            score = classifier.score_read_against_window(representative, c["ref_window"])
+                            if score > best_score:
+                                best_score = score
+                                best_class = c["gene"]
+                    
+                    if best_class is None:
+                        unresolved_reads.extend(cluster_reads)
+                    else:
+                        rescued_by_class[best_class].extend(cluster_reads)
+                        
+                print(f"  [PROCESS_FILES_MULTI] Rescued clusters formed: {sum(len(v) for v in rescued_by_class.values())} reads rescued. Unresolved: {len(unresolved_reads)}")
+                
+                for gene_payload in genes_payload:
+                    g_name = gene_payload["gene"]
+                    rescued_reads = rescued_by_class[g_name]
+                    if rescued_reads:
+                        g_targets = gene_payload.get("targets", [])
+                        for t in g_targets:
+                            if not t.get("reference_seq"):
+                                t["reference_seq"] = gene_payload["sequence"]
+                                
+                        rescued_results = run_analysis_on_reads(rescued_reads, g_targets, phred_threshold, indel_threshold)
+                        
+                        gene_output["genes"].append({
+                            "gene": f"{g_name}-rescued",
+                            "assigned_read_count": len(rescued_reads),
+                            "ambiguous_excluded": False,
+                            "is_rescued_derived": True,
+                            "analysis_result": {"targets": rescued_results}
+                        })
+                
+                amb_reads_to_analyze = unresolved_reads
+            else:
+                amb_reads_to_analyze = amb_reads_data
+            
+            if amb_reads_to_analyze:
+                for gene_payload in genes_payload:
+                    g_name = gene_payload["gene"]
+                    g_targets = gene_payload.get("targets", [])
+                    for t in g_targets:
+                        if not t.get("reference_seq"):
+                            t["reference_seq"] = gene_payload["sequence"]
+
+                    amb_results = run_analysis_on_reads(amb_reads_to_analyze, g_targets, phred_threshold, indel_threshold)
+                    
+                    gene_output["genes"].append({
+                        "gene": f"{g_name}-ambiguous",
+                        "assigned_read_count": len(amb_reads_to_analyze),
+                        "ambiguous_excluded": False,
+                        "is_ambiguous_derived": True,
+                        "analysis_result": {"targets": amb_results}
+                    })
 
         final_payload["results"].append({
             "fastq_file": filepath,

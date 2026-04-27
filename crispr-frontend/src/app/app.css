@@ -723,15 +723,17 @@ th, td {
 .gene-tabs {
   display: flex;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
   padding-bottom: 0;
   border-bottom: 2px solid #e0e6ed;
   margin-bottom: 0;
   align-items: flex-end;
 }
 
-.flex-spacer {
-  flex: 1;
+.gene-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .gene-tab-btn {
@@ -740,16 +742,20 @@ th, td {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: 10px 20px 8px;
+  padding: 10px 10px 8px;
   background: #f4f7f9;
   border: 1px solid #dce3eb;
   border-bottom: none;
   border-radius: 8px 8px 0 0;
   cursor: pointer;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  transition: background 0.18s, color 0.18s, box-shadow 0.18s;
+  transition: all 0.2s;
   outline: none;
   bottom: -2px;        /* sit on the border-bottom hairline */
+  flex: 1 1 140px;
+  max-width: 160px;
+  min-width: 50px;
+  overflow: hidden;
 }
 
 .gene-tab-btn:hover:not(.active) {
@@ -764,6 +770,8 @@ th, td {
   color: #1a9e55;
   box-shadow: 0 -3px 0 0 #2ecc71 inset;
   z-index: 5;
+  flex-shrink: 0;
+  min-width: 120px;
 }
 
 /* Ambiguous tab specialized styling */
@@ -793,6 +801,20 @@ th, td {
   font-weight: 700;
   letter-spacing: 0.02em;
   color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  text-align: center;
+}
+
+.gene-tab-count {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  text-align: center;
+  font-size: 0.8rem;
 }
 
 .gene-tab-btn:not(.active) .gene-tab-label {

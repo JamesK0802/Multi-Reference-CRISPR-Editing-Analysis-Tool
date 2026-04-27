@@ -42,10 +42,14 @@
           <span class="gene-tab-count">{{ g.assigned_read_count | number }} reads</span>
         </button>
 
-        <!-- Dynamic Spacer to push ambiguous tabs to the right -->
-        <div class="flex-spacer"></div>
+        <!-- Rescued Tabs (Middle) -->
+        <button *ngFor="let g of rescuedGenes; let i = index" role="tab" class="gene-tab-btn rescued-derived"
+          [class.active]="genes.indexOf(g) === selectedGeneIndex" (click)="selectGene(genes.indexOf(g))" style="background-color: #e8f5e9; border-color: #a5d6a7;">
+          <span class="gene-tab-label">{{ g.gene }}</span>
+          <span class="gene-tab-count">{{ g.assigned_read_count | number }} reads</span>
+        </button>
 
-        <!-- Ambiguous Tabs (Right-aligned) -->
+        <!-- Ambiguous Tabs (Right-aligned initially, now left) -->
         <button *ngFor="let g of ambiguousGenes; let i = index" role="tab" class="gene-tab-btn ambiguous-derived"
           [class.active]="genes.indexOf(g) === selectedGeneIndex" (click)="selectGene(genes.indexOf(g))">
           <span class="gene-tab-label">{{ g.gene }}</span>
@@ -304,6 +308,13 @@
           <div class="toggle-control">
             <input type="checkbox" formControlName="analyzeAmbiguous" id="ambiguousToggle" />
             <label for="ambiguousToggle" class="toggle-label"></label>
+          </div>
+        </div>
+        <div class="form-group toggle-group" *ngIf="analysisForm.get('analyzeAmbiguous')?.value">
+          <label>Rescue Ambiguous Reads:</label>
+          <div class="toggle-control">
+            <input type="checkbox" formControlName="rescueAmbiguous" id="rescueToggle" />
+            <label for="rescueToggle" class="toggle-label"></label>
           </div>
         </div>
       </div>

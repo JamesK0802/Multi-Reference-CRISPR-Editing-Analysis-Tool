@@ -68,6 +68,14 @@ The CRISPR Editing Analysis Tool is a high-performance analysis pipeline designe
 
 ## Version History
 
+### v1.4.0 - Ambiguous-Read Rescue Layer (2026-04-27)
+- **New Feature**: **Ambiguous-Read Rescue Layer** added. Allows unassigned reads to be clustered and "rescued" into their best-matching classes.
+- **Algorithm**: Implemented robust **k-mer Jaccard similarity clustering** (approx. 85% identity) for ambiguous reads, effectively handling read length variations and indels.
+- **Behavior**: Clusters of size $\ge 3$ are re-scored against target classes without margin constraints; non-rescued reads remain in the unresolved pool.
+- **UI (Tabs)**: Refactored gene tab-bar with **"Edge-style" shrinking logic**. Tabs now left-align and shrink dynamically as count increases, with the active tab preserved at full width.
+- **UI (Progress)**: Added a smooth 800ms delay to the progress bar completion state to ensure the "Analysis Complete ✓" state is visible even for fast results.
+- **Configuration**: Added "Rescue Ambiguous Reads" toggle (appears only when Analyze Ambiguous is active).
+
 ### v1.3.0 - Desktop Stable (2026-04-23)
 - **New Feature**: **Analyze Ambiguous Reads** toggle added. Allows secondary class-specific analysis on the unassigned read pool.
 - **Algorithm**: Overhauled **"All Merged"** data logic—now aggregates raw counts across all files and recalculates biological metrics (%, efficiency) for true global statistics.
