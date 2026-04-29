@@ -63,16 +63,21 @@ The CRISPR Editing Analysis Tool is a high-performance analysis pipeline designe
     - Use the **Top-level Tabs** to switch between **All Merged** and **Individual File** results.
     - Use the **Gene Tabs** to drill down into specific loci.
     - Click rows in the summary table to update charts and the annotation view.
+6.  **Restore Results**:
+    - Navigate to the **Result Viewer** tab.
+    - Drag and drop a previously exported Excel (`.xlsx`) file into the drop zone.
+    - The tool will instantly reconstruct the entire analysis dashboard (charts, tables, annotations) with 100% fidelity.
 
 ---
 
 ## Version History
 
-### v1.5.0 - Export & Premium UI (2026-04-29)
-- **New Feature**: **Excel Export** added. Allows users to download a `.xlsx` report containing parameter snapshots, read flow, and per-class metrics with internal hyperlinks.
-- **New Feature**: **Rendered HTML Export**. Captures the currently visible DOM and CSS, generating a standalone `.html` view of the analysis result.
-- **UI Refresh**: Evolved the parameter configuration pane with modern dropdowns and balanced 1.2 layout tokens for a more premium feel.
-- **Robustness**: Hardened the multi-reference result assembly in the backend, gracefully catching edge-cases where specific gRNAs are absent from their target references.
+### v1.5.0 - Result Persistence & Viewer (2026-04-30)
+- **New Feature**: **Result Viewer Tab** added. Allows users to "Restore Session" by dragging and dropping an exported Excel report. Perfect for reviewing past results without the raw FASTQ files.
+- **New Feature**: **Excel Export (Enhanced)**. Reports now include a hidden `.metadata` sheet containing the raw analysis JSON. This ensures 100% data fidelity when reloading results into the Result Viewer.
+- **Bug Fix (Critical)**: Resolved a discrepancy where `Aligned Reads` count displayed the raw matched total instead of the filtered classification total, ensuring percentages always sum correctly.
+- **Performance**: Optimized frontend merging logic for multi-file results by using raw integers from the backend instead of recalculating from rounded percentages.
+- **UI Refresh**: Added a dedicated **📖 Result Viewer** top-level tab; removed legacy icons and experimental HTML export to streamline the professional reporting pipeline.
 
 ### v1.4.0 - Ambiguous-Read Rescue Layer (2026-04-27)
 - **New Feature**: **Ambiguous-Read Rescue Layer** added. Allows unassigned reads to be clustered and "rescued" into their best-matching classes.

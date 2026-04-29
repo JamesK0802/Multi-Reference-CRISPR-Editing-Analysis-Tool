@@ -2,12 +2,12 @@
 
   <!-- ══════════════ HEADER ══════════════ -->
   <div class="header-section">
-    <h1>CRISPR Analysis Tool <span style="font-size: 0.5em; color: #7f8c8d; vertical-align: middle; margin-left: 8px; font-weight: 600; padding: 2px 6px; background: #f0f4f8; border-radius: 4px; border: 1px solid #e0e6ed;">v1.4.0</span></h1>
+    <h1>CRISPR Analysis Tool <span style="font-size: 0.5em; color: #7f8c8d; vertical-align: middle; margin-left: 8px; font-weight: 600; padding: 2px 6px; background: #f0f4f8; border-radius: 4px; border: 1px solid #e0e6ed;">v1.5.0</span></h1>
     <div class="controls">
       <!-- Top-level tab switcher -->
       <button (click)="toggleAnalysis()" [class.active]="showAnalysis" class="btn-toggle">🔬 Analysis</button>
-      <button (click)="toggleBenchmark()" [class.active]="showBenchmark" class="btn-toggle btn-bench-tab">📐
-        Benchmark</button>
+      <button (click)="toggleBenchmark()" [class.active]="showBenchmark" class="btn-toggle btn-bench-tab">📐 Benchmark</button>
+      <button (click)="toggleViewer()" [class.active]="showViewer" class="btn-toggle btn-viewer-tab">📖 Result Viewer</button>
 
       <span class="controls-divider"></span>
 
@@ -16,16 +16,13 @@
   </div>
 
   <!-- ══════════════ EXPORT WRAPPER ══════════════ -->
-  <div id="analysis-results-export-area">
+  <div>
 
   <!-- ══════════════ RESULTS DASHBOARD ══════════════ -->
-  <div *ngIf="showAnalysis && genes.length > 0" class="results-dashboard" id="resultsSection">
+  <div *ngIf="(showAnalysis || showViewer) && genes.length > 0" class="results-dashboard" id="resultsSection">
 
     <!-- ── Export Button ── -->
     <div class="export-bar">
-      <button type="button" class="btn-export" (click)="exportRenderedHtml()" [disabled]="mergedGenes.length === 0" style="margin-right: 10px; background: linear-gradient(135deg, #e67e22, #d35400);">
-        <span class="export-icon">🌐</span> Export Rendered HTML
-      </button>
       <button type="button" class="btn-export" (click)="exportToExcel()" [disabled]="mergedGenes.length === 0">
         <span class="export-icon">📊</span> Export Excel
       </button>
@@ -163,7 +160,7 @@
   <!-- ══════════════ ANNOTATION PANEL ══════════════ -->
   <!-- Condition: selectedTarget must exist (works for BOTH single and multi-ref) -->
   <div class="annotation-panel"
-    *ngIf="showAnalysis && selectedTarget && selectedTarget.top_groups && selectedTarget.top_groups.length > 0">
+    *ngIf="(showAnalysis || showViewer) && selectedTarget && selectedTarget.top_groups && selectedTarget.top_groups.length > 0">
     <div class="anno-header">
       <div>
         <h2>ANNOTATION</h2>
@@ -194,8 +191,6 @@
                   *ngFor="let char of (selectedTarget.display_sgrna_seq || selectedTarget.sgrna_seq || '').split('')"
                   style="font-size: 11px; font-weight: 800; color: #34495e; font-family: monospace;">{{ char }}</span>
               </div>
-              <div style="position: absolute; font-size: 18px; bottom: -12px; color: #2c3e50; z-index: 25;"
-                [style.left.px]="selectedTarget.cut_site_index * 13 - 9">✂</div>
             </div>
             <!-- Reference bases -->
             <div class="seq-mono ref-seq" style="display: flex; height: 16px;">
@@ -245,6 +240,17 @@
   </div>
 
   </div> <!-- /#analysis-results-export-area -->
+
+  <!-- ══════════════ VIEWER DROP ZONE ══════════════ -->
+  <div *ngIf="showViewer && genes.length === 0" class="config-section">
+    <div class="upload-zone" [class.dragging]="isDragging" (drop)="onExcelDropped($event)"
+      (dragover)="onDragOver($event)" (dragleave)="onDragLeave($event)" (click)="excelInput.click()">
+      <input type="file" #excelInput (change)="onExcelSelected($event)" hidden accept=".xlsx" />
+      <div class="upload-icon">📊</div>
+      <p><strong>Drop exported CRISPR analysis Excel report here</strong></p>
+      <span class="hint">Only .xlsx files exported by this tool</span>
+    </div>
+  </div>
 
   <!-- ══════════════ CONFIGURATION FORM (Analysis) ══════════════ -->
   <form *ngIf="showAnalysis" [formGroup]="analysisForm" (ngSubmit)="runAnalysis()">

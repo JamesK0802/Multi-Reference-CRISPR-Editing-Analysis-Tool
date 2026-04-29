@@ -60,6 +60,14 @@ export class ExcelExportService {
       this.buildSheet(wb, scope, params);
     }
 
+    // Add hidden data sheet for perfect restoration in Result Viewer
+    const dataSheet = wb.addWorksheet('.metadata', { state: 'hidden' });
+    const jsonData = JSON.stringify({ params, scopes });
+    const chunkSize = 30000; // Excel cell limit is ~32k
+    for (let i = 0; i < jsonData.length; i += chunkSize) {
+      dataSheet.addRow([jsonData.substring(i, i + chunkSize)]);
+    }
+
     const buf = await wb.xlsx.writeBuffer();
     const now = new Date();
     const ts = now.getFullYear().toString()
@@ -345,5 +353,173 @@ export class ExcelExportService {
     for (let i = 1; i <= cols; i++) {
       r.getCell(i).fill = this.STRIPE_FILL;
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Import from Excel (Reconstruct State)
+  // ═══════════════════════════════════════════════════════════════════════════
+  async importFromExcel(file: File): Promise<{ params: Partial<ExportParams>, scopes: ScopeData[] }> {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await file.arrayBuffer());
+
+    const scopes: ScopeData[] = [];
+    const params: Partial<ExportParams> = {};
+
+    // ── Strategy A: Try reading from hidden metadata sheet (100% fidelity) ───
+    const metaSheet = wb.getWorksheet('.metadata');
+    if (metaSheet) {
+      let jsonStr = '';
+      metaSheet.eachRow(row => {
+        const val = row.getCell(1).text;
+        if (val) jsonStr += val;
+      });
+      try {
+        const restored = JSON.parse(jsonStr);
+        if (restored.params && restored.scopes) {
+          console.log('Restored state from hidden metadata sheet.');
+          return restored;
+        }
+      } catch (e) {
+        console.warn('Failed to parse metadata sheet, falling back to visual parsing.', e);
+      }
+    }
+
+    // ── Strategy B: Fallback to visual row parsing ───────────────────────────
+    wb.worksheets.forEach(ws => {
+      if (ws.name === '.metadata') return; // Skip internal sheet
+
+      const scope: ScopeData = {
+        sheetName: ws.name,
+        readFlow: { rawReads: 0, phredPassed: 0, anchorMatched: 0, assignedReads: 0, ambiguousReads: 0 },
+        genes: []
+      };
+
+      let currentSection = 0;
+      let currentGene: GeneResult | null = null;
+      let currentTarget: any = null;
+      let inAnnotationGroup = false;
+
+      ws.eachRow((row) => {
+        const cell1 = row.getCell(1).text?.trim();
+        if (!cell1) {
+          inAnnotationGroup = false;
+          return;
+        }
+
+        if (cell1.startsWith('1. Analysis Parameters')) { currentSection = 1; return; }
+        if (cell1.startsWith('2. Read Flow Summary')) { currentSection = 2; return; }
+        if (cell1.startsWith('3. Per-Class Summary')) { currentSection = 3; return; }
+        if (cell1.startsWith('4. Detailed Analysis')) { currentSection = 4; return; }
+
+        // Section 1: Parameters (only parse from Merged sheet)
+        if (currentSection === 1 && ws.name === 'Merged') {
+          const val = row.getCell(2).value;
+          if (cell1 === 'Window Size (bp)') params.windowSize = Number(val);
+          if (cell1 === 'Phred Threshold') params.phredThreshold = Number(val);
+          if (cell1 === 'Indel Threshold (%)') params.indelThreshold = Number(val);
+          if (cell1 === 'Assignment Margin (%)') params.assignmentMargin = Number(val);
+          if (cell1 === 'Analyze Ambiguous Reads') params.analyzeAmbiguous = (val === 'Yes');
+          if (cell1 === 'Rescue Ambiguous Reads') params.rescueAmbiguous = (val === 'Yes');
+          if (cell1 === 'Data Type') params.dataType = val as string;
+          if (cell1 === 'Number of FASTQ Files') params.fileCount = Number(val);
+        }
+
+        // Section 2: Read Flow
+        if (currentSection === 2) {
+          const valStr = row.getCell(2).text;
+          const val = Number(valStr.replace(/,/g, '')) || 0;
+          if (cell1 === 'Raw Reads') scope.readFlow.rawReads = val;
+          if (cell1 === 'Reads after Phred Filtering') scope.readFlow.phredPassed = val;
+          if (cell1 === 'Anchor Matched') scope.readFlow.anchorMatched = val;
+          if (cell1 === 'Assigned Reads') scope.readFlow.assignedReads = val;
+          if (cell1 === 'Final Ambiguous Reads') scope.readFlow.ambiguousReads = val;
+        }
+
+        // Section 4: Detailed Analysis
+        if (currentSection === 4) {
+          if (cell1.startsWith('Gene: ')) {
+            const gName = cell1.replace('Gene: ', '').trim();
+            currentGene = {
+              gene: gName,
+              assigned_read_count: 0,
+              is_rescued_derived: false,
+              is_ambiguous_derived: false,
+              ambiguous_excluded: false,
+              analysis_result: { targets: [] }
+            };
+            scope.genes.push(currentGene as GeneResult);
+            inAnnotationGroup = false;
+            return;
+          }
+
+          if (!currentGene) return;
+
+          if (cell1 === 'Source Type:') {
+            const src = row.getCell(2).text;
+            if (src === 'Rescued') currentGene.is_rescued_derived = true;
+            if (src === 'Ambiguous') currentGene.is_ambiguous_derived = true;
+            return;
+          }
+          if (cell1 === 'Assigned Reads:') {
+            currentGene.assigned_read_count = Number(row.getCell(2).text.replace(/,/g, '')) || 0;
+            return;
+          }
+
+          if (cell1.startsWith('Target: ')) {
+            const tName = cell1.replace('Target: ', '').trim();
+            currentTarget = {
+              target_id: tName,
+              summary: { total_reads: 0, matched_reads: 0, aligned_reads: 0, unedited_reads: 0, edited_reads: 0 },
+              top_groups: []
+            };
+            currentGene.analysis_result!.targets!.push(currentTarget);
+            inAnnotationGroup = false;
+            return;
+          }
+
+          if (!currentTarget) return;
+
+          if (!inAnnotationGroup) {
+            const valStr = row.getCell(2).text.replace(/,/g, '').replace(/%/g, '');
+            const numVal = parseFloat(valStr) || 0;
+            
+            if (cell1 === 'Total Reads') currentTarget.summary.total_reads = numVal;
+            if (cell1 === 'Aligned Reads') currentTarget.summary.aligned_reads = numVal;
+            if (cell1 === 'Out-of-frame %') currentTarget.summary.out_of_frame_pct = numVal;
+            if (cell1 === 'In-frame %') currentTarget.summary.in_frame_pct = numVal;
+            if (cell1 === 'No Indel %') currentTarget.summary.no_indel_pct = numVal;
+            if (cell1 === 'Substitution %') currentTarget.summary.substitution_pct = numVal;
+
+            if (cell1 === 'Rank' && row.getCell(2).text === 'Type') {
+              inAnnotationGroup = true;
+              return;
+            }
+          } else {
+            // Table Headers: ['Rank', 'Type', 'Read Count', 'Percentage', 'Net Indel', 'Sequence'];
+            const rankStr = cell1;
+            const rank = parseInt(rankStr);
+            if (isNaN(rank)) {
+              inAnnotationGroup = false;
+              return;
+            }
+
+            const grp = {
+              group_rank: rank,
+              classification: row.getCell(2).text || 'Unknown',
+              read_count: Number(row.getCell(3).text.replace(/,/g, '')) || 0,
+              read_pct: parseFloat(row.getCell(4).text.replace(/%/g, '')) || 0,
+              net_indel: Number(row.getCell(5).text) || 0,
+              read_inner: row.getCell(6).text || '',
+              representative_read: ''
+            };
+            currentTarget.top_groups.push(grp);
+          }
+        }
+      });
+
+      scopes.push(scope);
+    });
+
+    return { params, scopes };
   }
 }

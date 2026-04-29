@@ -1165,6 +1165,9 @@ th, td {
 .btn-bench-tab { border-color: #8e44ad; color: #8e44ad; }
 .btn-bench-tab.active { background: #8e44ad; color: white; border-color: #6c3483; }
 
+.btn-viewer-tab { border-color: #e67e22; color: #e67e22; }
+.btn-viewer-tab.active { background: #e67e22; color: white; border-color: #d35400; }
+
 .controls-divider {
   display: inline-block; width: 1px; height: 24px;
   background: #ddd; margin: 0 8px; vertical-align: middle;

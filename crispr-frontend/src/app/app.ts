@@ -43,6 +43,7 @@ export class App implements OnInit, OnDestroy {
   // ── View state ────────────────────────────────────────────────────────────
   showAnalysis = true;
   showBenchmark = false;
+  showViewer = false;
 
   multiFileCount = 0;        // how many FASTQ files were in the response
 
@@ -182,12 +183,23 @@ export class App implements OnInit, OnDestroy {
   }
 
   toggleAnalysis() {
-    this.showAnalysis = !this.showAnalysis;
+    this.showAnalysis = true;
+    this.showBenchmark = false;
+    this.showViewer = false;
     this.cdr.detectChanges();
   }
 
   toggleBenchmark() {
-    this.showBenchmark = !this.showBenchmark;
+    this.showAnalysis = false;
+    this.showBenchmark = true;
+    this.showViewer = false;
+    this.cdr.detectChanges();
+  }
+
+  toggleViewer() {
+    this.showAnalysis = false;
+    this.showBenchmark = false;
+    this.showViewer = true;
     this.cdr.detectChanges();
   }
 
@@ -326,7 +338,71 @@ export class App implements OnInit, OnDestroy {
     });
   }
 
-  // ── File handling ──────────────────────────────────────────────────────────
+  // ── Result Viewer File Upload ─────────────────────────────────────────────
+  onExcelDropped(event: DragEvent) {
+    event.preventDefault();
+    this.isDragging = false;
+    const files = event.dataTransfer?.files;
+    if (files && files.length > 0) {
+      this.loadExcelResult(files[0]);
+    }
+  }
+
+  onExcelSelected(event: Event) {
+    const input = event.target as HTMLInputElement;
+    if (input.files && input.files.length > 0) {
+      this.loadExcelResult(input.files[0]);
+    }
+  }
+
+  async loadExcelResult(file: File) {
+    try {
+      this.addLog(`Loading excel file: ${file.name}`);
+      const data = await this.excelExportService.importFromExcel(file);
+      
+      this.lastRunParams = data.params as ExportParams;
+      this.allFileResults = [];
+      
+      const mergedScope = data.scopes.find(s => s.sheetName === 'Merged');
+      if (mergedScope) {
+        this.mergedGenes = mergedScope.genes;
+        this.totalMergedRawReads = mergedScope.readFlow.rawReads;
+        this.totalMergedPhredPassed = mergedScope.readFlow.phredPassed;
+        this.totalMergedAnchorMatched = mergedScope.readFlow.anchorMatched;
+        this.totalMergedAmbiguous = mergedScope.readFlow.ambiguousReads;
+      } else {
+        this.mergedGenes = [];
+      }
+
+      const fileScopes = data.scopes.filter(s => s.sheetName !== 'Merged');
+      for (const scope of fileScopes) {
+        this.allFileResults.push({
+          fastq_file: scope.sheetName,
+          multi_reference_result: {
+            debug: {
+              total_reads_parsed: scope.readFlow.rawReads,
+              phred_passed_count: scope.readFlow.phredPassed,
+              anchor_matched_count: scope.readFlow.anchorMatched
+            },
+            ambiguous_read_count: scope.readFlow.ambiguousReads,
+            genes: scope.genes
+          }
+        });
+      }
+
+      this.isMultiReference = true;
+      this.multiFileCount = fileScopes.length;
+      this.selectedScopeIndex = -1;
+      this.updateVisibleGenes();
+
+      this.addLog(`Excel report imported successfully.`);
+    } catch (e: any) {
+      console.error('Excel import failed:', e);
+      this.addLog(`Excel import failed: ${e.message}`);
+    }
+  }
+
+  // ── Unified API execution ──────────────────────────────────────────────────────────
   onFileSelected(event: any) { this.addFiles(event.target.files); }
   onFileDropped(event: DragEvent) {
     event.preventDefault();
@@ -517,43 +593,35 @@ export class App implements OnInit, OnDestroy {
                   const s1 = extT.summary;
                   const s2 = newT.summary;
 
-                  // Derive counts from percentages to allow accurate merging
-                  const getCount = (sum: any, key: string) => Math.round(sum.aligned_reads * (sum[key] / 100));
-                  
-                  const s1_oof = getCount(s1, 'out_of_frame_pct');
-                  const s1_inf = getCount(s1, 'in_frame_pct');
-                  const s1_no  = getCount(s1, 'no_indel_pct');
-                  const s1_sub = getCount(s1, 'substitution_pct');
+                  // Use raw breakdown counts for perfect merging
+                  const b1 = extT.breakdown || { out_of_frame: 0, in_frame: 0, no_indel: 0, substitution: 0 };
+                  const b2 = newT.breakdown || { out_of_frame: 0, in_frame: 0, no_indel: 0, substitution: 0 };
 
-                  const s2_oof = getCount(s2, 'out_of_frame_pct');
-                  const s2_inf = getCount(s2, 'in_frame_pct');
-                  const s2_no  = getCount(s2, 'no_indel_pct');
-                  const s2_sub = getCount(s2, 'substitution_pct');
+                  b1.out_of_frame += (b2.out_of_frame || 0);
+                  b1.in_frame     += (b2.in_frame || 0);
+                  b1.no_indel     += (b2.no_indel || 0); // This is pure unmodified
+                  b1.substitution += (b2.substitution || 0);
+                  extT.breakdown = b1;
 
                   // Aggregate raw sums
                   s1.total_reads   += s2.total_reads;
                   s1.matched_reads += s2.matched_reads;
                   s1.aligned_reads += s2.aligned_reads;
-                  s1.modified      += s2.modified;
-                  s1.unmodified    += s2.unmodified;
-
+                  
                   const total_aligned = s1.aligned_reads || 1;
                   const pct = (val: number) => Math.round((val / total_aligned) * 10000) / 100;
 
-                  // Recalculate percentages
-                  s1.out_of_frame_pct = pct(s1_oof + s2_oof);
-                  s1.in_frame_pct     = pct(s1_inf + s2_inf);
-                  s1.no_indel_pct     = pct(s1_no  + s2_no);
-                  s1.substitution_pct = pct(s1_sub + s2_sub);
+                  // Recalculate percentages from absolute sums
+                  const total_no_indel = b1.no_indel + b1.substitution;
+                  s1.out_of_frame_pct = pct(b1.out_of_frame);
+                  s1.in_frame_pct     = pct(b1.in_frame);
+                  s1.no_indel_pct     = pct(total_no_indel);
+                  s1.substitution_pct = pct(b1.substitution);
+                  s1.modified         = b1.out_of_frame + b1.in_frame;
+                  s1.unmodified       = total_no_indel;
                   s1.editing_efficiency = Math.round(((s1.modified) / (s1.total_reads || 1)) * 10000) / 100;
 
-                  // Merge breakdown counts
-                  if (extT.breakdown && newT.breakdown) {
-                    extT.breakdown.no_indel = (extT.breakdown.no_indel || 0) + (newT.breakdown.no_indel || 0);
-                    extT.breakdown.substitution = (extT.breakdown.substitution || 0) + (newT.breakdown.substitution || 0);
-                    extT.breakdown.in_frame = (extT.breakdown.in_frame || 0) + (newT.breakdown.in_frame || 0);
-                    extT.breakdown.out_of_frame = (extT.breakdown.out_of_frame || 0) + (newT.breakdown.out_of_frame || 0);
-                  }
+
 
                   // Merge top_groups by read_inner (the sequence pattern)
                   if (newT.top_groups && extT.top_groups) {
@@ -639,7 +707,7 @@ export class App implements OnInit, OnDestroy {
       sample: this.currentGene?.gene ?? 'Gene',
       target: item.target.target_id,
       total: item.target.summary?.total_reads ?? 0,
-      matched: item.target.summary?.matched_reads ?? 0,
+      matched: item.target.summary?.aligned_reads ?? 0,
       outOfFrame: item.target.summary?.out_of_frame_pct ?? 0,
       inFrame: item.target.summary?.in_frame_pct ?? 0,
       noIndel: item.target.summary?.no_indel_pct ?? 0,
@@ -669,7 +737,7 @@ export class App implements OnInit, OnDestroy {
 
       this.metrics = {
         totalReads: this.selectedTarget.summary?.total_reads ?? 0,
-        alignedReads: this.selectedTarget.summary?.matched_reads ?? 0,
+        alignedReads: this.selectedTarget.summary?.aligned_reads ?? 0,
         avgOutOfFrame: this.selectedTarget.summary?.out_of_frame_pct ?? 0,
         avgInFrame: this.selectedTarget.summary?.in_frame_pct ?? 0,
         avgNoIndel: this.selectedTarget.summary?.no_indel_pct ?? 0,
@@ -1013,102 +1081,6 @@ export class App implements OnInit, OnDestroy {
         this.cdr.detectChanges();
       })
     });
-  }
-
-  // ── HTML Export ───────────────────────────────────────────────────────────
-  exportRenderedHtml() {
-    if (this.mergedGenes.length === 0) return;
-
-    const exportArea = document.getElementById('analysis-results-export-area');
-    if (!exportArea) return;
-
-    // Clone the DOM node
-    const clone = exportArea.cloneNode(true) as HTMLElement;
-
-    // Remove the export bar from the clone
-    const exportBar = clone.querySelector('.export-bar');
-    if (exportBar) exportBar.remove();
-
-    // Convert canvases to images in the clone
-    const originalCanvases = exportArea.querySelectorAll('canvas');
-    const clonedCanvases = clone.querySelectorAll('canvas');
-
-    for (let i = 0; i < originalCanvases.length; i++) {
-      const origCanvas = originalCanvases[i];
-      const cloneCanvas = clonedCanvases[i];
-
-      const img = document.createElement('img');
-      img.src = origCanvas.toDataURL('image/png');
-      img.style.width = origCanvas.style.width || origCanvas.width + 'px';
-      img.style.height = origCanvas.style.height || origCanvas.height + 'px';
-      img.style.maxWidth = '100%';
-
-      cloneCanvas.parentNode?.replaceChild(img, cloneCanvas);
-    }
-
-    // Collect all styles from the current document
-    let stylesHtml = '';
-    const styleNodes = document.querySelectorAll('style, link[rel="stylesheet"]');
-    for (let i = 0; i < styleNodes.length; i++) {
-      stylesHtml += styleNodes[i].outerHTML + '\n';
-    }
-
-    // Prepare the HTML content
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-        <meta charset="utf-8">
-        <title>CRISPR Analysis Rendered Report</title>
-        ${stylesHtml}
-        <style>
-          body {
-            background-color: #f8f9fa;
-            padding: 20px;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-          }
-          .export-note {
-            background-color: #fff3cd;
-            color: #856404;
-            padding: 10px 15px;
-            margin-bottom: 20px;
-            border-radius: 4px;
-            border: 1px solid #ffeeba;
-            font-size: 14px;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="export-note">
-            <strong>Note:</strong> This report captures the currently visible analysis result view.
-          </div>
-          ${clone.outerHTML}
-        </div>
-      </body>
-      </html>
-    `;
-
-    // Create Blob and trigger download
-    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
-    const now = new Date();
-    const ts = now.getFullYear().toString()
-      + String(now.getMonth() + 1).padStart(2, '0')
-      + String(now.getDate()).padStart(2, '0')
-      + '-'
-      + String(now.getHours()).padStart(2, '0')
-      + String(now.getMinutes()).padStart(2, '0');
-    
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `crispr-rendered-results-${ts}.html`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    
-    this.addLog('Rendered HTML exported successfully.');
   }
 
   // ── Excel Export ──────────────────────────────────────────────────────────
