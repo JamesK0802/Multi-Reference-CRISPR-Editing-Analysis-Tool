@@ -68,6 +68,12 @@ The CRISPR Editing Analysis Tool is a high-performance analysis pipeline designe
 
 ## Version History
 
+### v1.5.0 - Export & Premium UI (2026-04-29)
+- **New Feature**: **Excel Export** added. Allows users to download a `.xlsx` report containing parameter snapshots, read flow, and per-class metrics with internal hyperlinks.
+- **New Feature**: **Rendered HTML Export**. Captures the currently visible DOM and CSS, generating a standalone `.html` view of the analysis result.
+- **UI Refresh**: Evolved the parameter configuration pane with modern dropdowns and balanced 1.2 layout tokens for a more premium feel.
+- **Robustness**: Hardened the multi-reference result assembly in the backend, gracefully catching edge-cases where specific gRNAs are absent from their target references.
+
 ### v1.4.0 - Ambiguous-Read Rescue Layer (2026-04-27)
 - **New Feature**: **Ambiguous-Read Rescue Layer** added. Allows unassigned reads to be clustered and "rescued" into their best-matching classes.
 - **Algorithm**: Implemented robust **k-mer Jaccard similarity clustering** (approx. 85% identity) for ambiguous reads, effectively handling read length variations and indels.

@@ -85,6 +85,8 @@ export interface MultiReferenceResponse {
   ambiguous_read_count: number;
   debug?: {
     total_reads_parsed: number;
+    phred_passed_count?: number;
+    anchor_matched_count?: number;
     assignment_margin_threshold_used: number;
     genes: Array<{
       gene: string;

@@ -42,10 +42,17 @@ def assign_reads_to_references(reads_data, gene_payloads, phred_threshold=10, ma
     total_reads = len(reads_data)
     ambiguous_count = 0
     filtered_count = 0
+    phred_passed_count = 0
     assigned_counts = {g["gene"]: 0 for g in gene_payloads}
     
     # 2. Iterate and classify
     for i, (seq, qual) in enumerate(reads_data):
+        # Global Phred check (independent of classification)
+        if qual is not None:
+            avg_q = classifier.avg_phred(qual)
+            if avg_q >= phred_threshold:
+                phred_passed_count += 1
+
         res = classifier.apply_classification(
             seq, qual, 
             classifier_classes, 
@@ -90,6 +97,8 @@ def assign_reads_to_references(reads_data, gene_payloads, phred_threshold=10, ma
             "assigned_count": sum(assigned_counts.values()),
             "ambiguous_count": ambiguous_count,
             "filtered_count": filtered_count,
+            "phred_passed_count": phred_passed_count,
+            "anchor_matched_count": total_reads - filtered_count,
             "per_gene_counts": assigned_counts
         }
     }

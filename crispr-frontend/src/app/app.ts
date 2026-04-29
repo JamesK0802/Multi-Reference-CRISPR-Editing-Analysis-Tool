@@ -2,6 +2,7 @@ import { Component, OnInit, OnDestroy, ChangeDetectorRef, NgZone } from '@angula
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, FormArray, Validators } from '@angular/forms';
 import { AnalysisService, TaskStatus } from './services/analysis.service';
+import { ExcelExportService, ExportParams, ScopeData } from './services/excel-export.service';
 import { AnalysisResponse, AnalysisBreakdown, GeneResult, MultiReferenceResponse,
          BenchmarkRow, BenchmarkResult, SplitPreview, SplitPreviewRow, CutSiteInfo } from './models/analysis.model';
 import { Chart } from 'chart.js/auto';
@@ -54,12 +55,20 @@ export class App implements OnInit, OnDestroy {
   // ── Scope state ────────────────────────────────────────────────────────────
   mergedGenes: GeneResult[] = [];
   totalMergedAmbiguous = 0;
+  totalRawReads = 0;
+  totalMergedRawReads = 0;
+  totalPhredPassed = 0;
+  totalMergedPhredPassed = 0;
+  totalAnchorMatched = 0;
+  totalMergedAnchorMatched = 0;
   allFileResults: any[] = [];
+  lastRunParams: ExportParams | null = null;
   selectedScopeIndex = -1; // -1 = All, 0..N = File index
 
   get currentGene(): GeneResult | null {
     return this.genes.length > 0 ? this.genes[this.selectedGeneIndex] : null;
   }
+
 
   get normalGenes(): GeneResult[] {
     return this.genes.filter(g => !g.is_ambiguous_derived && !g.is_rescued_derived);
@@ -97,11 +106,17 @@ export class App implements OnInit, OnDestroy {
     if (this.selectedScopeIndex === -1) {
       this.genes = this.mergedGenes;
       this.ambiguousReadCount = this.totalMergedAmbiguous;
+      this.totalRawReads = this.totalMergedRawReads;
+      this.totalPhredPassed = this.totalMergedPhredPassed;
+      this.totalAnchorMatched = this.totalMergedAnchorMatched;
     } else {
       const fileRes = this.allFileResults[this.selectedScopeIndex];
       const mrd = fileRes.multi_reference_result;
       this.genes = mrd.genes || [];
       this.ambiguousReadCount = mrd.ambiguous_read_count || 0;
+      this.totalRawReads = mrd.debug?.total_reads_parsed || 0;
+      this.totalPhredPassed = mrd.debug?.phred_passed_count || 0;
+      this.totalAnchorMatched = mrd.debug?.anchor_matched_count || 0;
     }
 
     if (prevGeneName) {
@@ -146,6 +161,7 @@ export class App implements OnInit, OnDestroy {
   constructor(
     private fb: FormBuilder,
     private analysisService: AnalysisService,
+    private excelExportService: ExcelExportService,
     private cdr: ChangeDetectorRef,
     private ngZone: NgZone
   ) {}
@@ -227,13 +243,23 @@ export class App implements OnInit, OnDestroy {
   // ── Form ───────────────────────────────────────────────────────────────────
   private initForm() {
     this.analysisForm = this.fb.group({
-      interestRegion: [90, [Validators.required, Validators.min(60), Validators.max(120)]],
-      phredThreshold: [10],
-      indelThreshold: [1.0],
+      interestRegion: [90, [Validators.required, Validators.min(50), Validators.max(130)]],
+      phredLevel: [1], // Default Level 1
+      marginPercent: [2], // Default 2%
+      indelPercent: [1], // Default 1%
       analyzeAmbiguous: [false],
       rescueAmbiguous: [false],
       genes: this.fb.array([this.createGeneGroup()])
     });
+
+    // Auto-reset Rescue if Analyze is OFF
+    this.analysisForm.get('analyzeAmbiguous')?.valueChanges
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(val => {
+        if (!val) {
+          this.analysisForm.get('rescueAmbiguous')?.setValue(false, { emitEvent: false });
+        }
+      });
   }
 
   // Single-ref target
@@ -352,10 +378,28 @@ export class App implements OnInit, OnDestroy {
 
       formData.append('data_type', 'single-end');
       formData.append('interest_region', (rawValue.interestRegion || 90).toString());
-      formData.append('phred_threshold', (rawValue.phredThreshold || 10).toString());
-      formData.append('indel_threshold', (rawValue.indelThreshold || 1.0).toString());
+      
+      // Map Level/Percent back to backend values
+      const phredVal = (rawValue.phredLevel || 1) * 10;
+      const indelVal = (rawValue.indelPercent || 1) * 1.0;
+      const marginVal = (rawValue.marginPercent || 2) / 100;
+      
+      formData.append('phred_threshold', phredVal.toString());
+      formData.append('indel_threshold', indelVal.toString());
       formData.append('is_multi_reference', 'true');
-      formData.append('assignment_margin_threshold', (this.assignmentMarginThreshold / 100).toString());
+      formData.append('assignment_margin_threshold', marginVal.toString());
+
+      // Snapshot parameters for Excel export
+      this.lastRunParams = {
+        windowSize: rawValue.interestRegion || 90,
+        phredThreshold: phredVal,
+        indelThreshold: indelVal,
+        assignmentMargin: (rawValue.marginPercent || 2),
+        analyzeAmbiguous: rawValue.analyzeAmbiguous || false,
+        rescueAmbiguous: rawValue.rescueAmbiguous || false,
+        dataType: 'single-end',
+        fileCount: this.selectedFiles.length
+      };
 
       // Unified gene payload
       const genesPayload = rawValue.genes.map((g: any, gi: number) => ({
@@ -447,11 +491,18 @@ export class App implements OnInit, OnDestroy {
         // Merge gene results across files: same gene name → accumulate assigned_read_count
         const geneMap = new Map<string, GeneResult>();
         let totalAmbiguous = 0;
+        let totalRaw = 0;
+        let totalPhred = 0;
+        let totalAnchor = 0;
 
         for (const fileResult of allResults) {
           const mrd: MultiReferenceResponse | undefined = fileResult?.multi_reference_result;
           if (!mrd) continue;
+          console.log('[DEBUG] MRD debug data:', mrd.debug);
           totalAmbiguous += mrd.ambiguous_read_count ?? 0;
+          totalRaw += mrd.debug?.total_reads_parsed ?? 0;
+          totalPhred += mrd.debug?.phred_passed_count ?? 0;
+          totalAnchor += mrd.debug?.anchor_matched_count ?? 0;
           for (const geneRes of (mrd.genes ?? [])) {
             if (geneMap.has(geneRes.gene)) {
               const existing = geneMap.get(geneRes.gene)!;
@@ -496,6 +547,14 @@ export class App implements OnInit, OnDestroy {
                   s1.substitution_pct = pct(s1_sub + s2_sub);
                   s1.editing_efficiency = Math.round(((s1.modified) / (s1.total_reads || 1)) * 10000) / 100;
 
+                  // Merge breakdown counts
+                  if (extT.breakdown && newT.breakdown) {
+                    extT.breakdown.no_indel = (extT.breakdown.no_indel || 0) + (newT.breakdown.no_indel || 0);
+                    extT.breakdown.substitution = (extT.breakdown.substitution || 0) + (newT.breakdown.substitution || 0);
+                    extT.breakdown.in_frame = (extT.breakdown.in_frame || 0) + (newT.breakdown.in_frame || 0);
+                    extT.breakdown.out_of_frame = (extT.breakdown.out_of_frame || 0) + (newT.breakdown.out_of_frame || 0);
+                  }
+
                   // Merge top_groups by read_inner (the sequence pattern)
                   if (newT.top_groups && extT.top_groups) {
                     const groupMap = new Map<string, any>();
@@ -528,6 +587,9 @@ export class App implements OnInit, OnDestroy {
 
         this.mergedGenes = Array.from(geneMap.values());
         this.totalMergedAmbiguous = totalAmbiguous;
+        this.totalMergedRawReads = totalRaw;
+        this.totalMergedPhredPassed = totalPhred;
+        this.totalMergedAnchorMatched = totalAnchor;
         this.allFileResults = allResults;
         this.selectedScopeIndex = -1;
 
@@ -679,21 +741,38 @@ export class App implements OnInit, OnDestroy {
           ),
           datasets: [
             {
-              label: 'Out-of-frame %',
-              data: flat.map(item => item.target.summary?.out_of_frame_pct ?? 0),
-              backgroundColor: '#e74c3c'
+              label: 'No Indel %',
+              data: flat.map(item => (item.target.summary?.no_indel_pct ?? 0) - (item.target.summary?.substitution_pct ?? 0)),
+              backgroundColor: '#2ecc71'
+            },
+            {
+              label: 'Substitution %',
+              data: flat.map(item => item.target.summary?.substitution_pct ?? 0),
+              backgroundColor: '#3498db'
             },
             {
               label: 'In-frame %',
               data: flat.map(item => item.target.summary?.in_frame_pct ?? 0),
               backgroundColor: '#e67e22'
+            },
+            {
+              label: 'Out-of-frame %',
+              data: flat.map(item => item.target.summary?.out_of_frame_pct ?? 0),
+              backgroundColor: '#e74c3c'
             }
           ]
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
-          scales: { x: { stacked: true }, y: { stacked: true } }
+          scales: { 
+            x: { stacked: true }, 
+            y: { stacked: true, min: 0, max: 100, title: { display: true, text: 'Percentage (%)' } } 
+          },
+          plugins: {
+            legend: { position: 'bottom' },
+            title: { display: true, text: 'Mutation Distribution per Target' }
+          }
         }
       }));
     }
@@ -704,7 +783,7 @@ export class App implements OnInit, OnDestroy {
       this.charts.push(new Chart(pieCtx, {
         type: 'pie',
         data: {
-          labels: ['No Indel', 'Substitution', 'In-frame', 'Out-of-frame'],
+          labels: ['Unmodified (No Indel)', 'Substitution', 'In-frame Indel', 'Out-of-frame Indel'],
           datasets: [{
             data: [
               selectedData.breakdown.no_indel ?? 0,
@@ -718,7 +797,10 @@ export class App implements OnInit, OnDestroy {
         options: {
           responsive: true,
           maintainAspectRatio: false,
-          plugins: { title: { display: true, text: `Mutation Distribution (${selectedData.target_id})` } }
+          plugins: { 
+            legend: { position: 'bottom' },
+            title: { display: true, text: `Mutation Distribution (${selectedData.target_id})` } 
+          }
         }
       }));
     }
@@ -931,5 +1013,156 @@ export class App implements OnInit, OnDestroy {
         this.cdr.detectChanges();
       })
     });
+  }
+
+  // ── HTML Export ───────────────────────────────────────────────────────────
+  exportRenderedHtml() {
+    if (this.mergedGenes.length === 0) return;
+
+    const exportArea = document.getElementById('analysis-results-export-area');
+    if (!exportArea) return;
+
+    // Clone the DOM node
+    const clone = exportArea.cloneNode(true) as HTMLElement;
+
+    // Remove the export bar from the clone
+    const exportBar = clone.querySelector('.export-bar');
+    if (exportBar) exportBar.remove();
+
+    // Convert canvases to images in the clone
+    const originalCanvases = exportArea.querySelectorAll('canvas');
+    const clonedCanvases = clone.querySelectorAll('canvas');
+
+    for (let i = 0; i < originalCanvases.length; i++) {
+      const origCanvas = originalCanvases[i];
+      const cloneCanvas = clonedCanvases[i];
+
+      const img = document.createElement('img');
+      img.src = origCanvas.toDataURL('image/png');
+      img.style.width = origCanvas.style.width || origCanvas.width + 'px';
+      img.style.height = origCanvas.style.height || origCanvas.height + 'px';
+      img.style.maxWidth = '100%';
+
+      cloneCanvas.parentNode?.replaceChild(img, cloneCanvas);
+    }
+
+    // Collect all styles from the current document
+    let stylesHtml = '';
+    const styleNodes = document.querySelectorAll('style, link[rel="stylesheet"]');
+    for (let i = 0; i < styleNodes.length; i++) {
+      stylesHtml += styleNodes[i].outerHTML + '\n';
+    }
+
+    // Prepare the HTML content
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="utf-8">
+        <title>CRISPR Analysis Rendered Report</title>
+        ${stylesHtml}
+        <style>
+          body {
+            background-color: #f8f9fa;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+          }
+          .export-note {
+            background-color: #fff3cd;
+            color: #856404;
+            padding: 10px 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            border: 1px solid #ffeeba;
+            font-size: 14px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="export-note">
+            <strong>Note:</strong> This report captures the currently visible analysis result view.
+          </div>
+          ${clone.outerHTML}
+        </div>
+      </body>
+      </html>
+    `;
+
+    // Create Blob and trigger download
+    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+    const now = new Date();
+    const ts = now.getFullYear().toString()
+      + String(now.getMonth() + 1).padStart(2, '0')
+      + String(now.getDate()).padStart(2, '0')
+      + '-'
+      + String(now.getHours()).padStart(2, '0')
+      + String(now.getMinutes()).padStart(2, '0');
+    
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `crispr-rendered-results-${ts}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    this.addLog('Rendered HTML exported successfully.');
+  }
+
+  // ── Excel Export ──────────────────────────────────────────────────────────
+  async exportToExcel() {
+    if (!this.lastRunParams || this.mergedGenes.length === 0) return;
+
+    const scopes: ScopeData[] = [];
+
+    // 1. Merged sheet
+    const totalAssigned = this.mergedGenes
+      .filter(g => !g.is_ambiguous_derived && !g.is_rescued_derived)
+      .reduce((s, g) => s + g.assigned_read_count, 0);
+    scopes.push({
+      sheetName: 'Merged',
+      readFlow: {
+        rawReads: this.totalMergedRawReads,
+        phredPassed: this.totalMergedPhredPassed,
+        anchorMatched: this.totalMergedAnchorMatched,
+        assignedReads: totalAssigned,
+        ambiguousReads: this.totalMergedAmbiguous,
+      },
+      genes: this.mergedGenes,
+    });
+
+    // 2. Per-file sheets
+    for (let i = 0; i < this.allFileResults.length; i++) {
+      const fileRes = this.allFileResults[i];
+      const mrd = fileRes?.multi_reference_result as MultiReferenceResponse | undefined;
+      if (!mrd) continue;
+
+      const fileName = (fileRes.fastq_file as string || '').split('/').pop() || `File${i + 1}`;
+      const fileGenes = mrd.genes || [];
+      const fileAssigned = fileGenes
+        .filter((g: GeneResult) => !g.is_ambiguous_derived && !g.is_rescued_derived)
+        .reduce((s: number, g: GeneResult) => s + g.assigned_read_count, 0);
+      scopes.push({
+        sheetName: fileName,
+        readFlow: {
+          rawReads: mrd.debug?.total_reads_parsed ?? 0,
+          phredPassed: mrd.debug?.phred_passed_count ?? 0,
+          anchorMatched: mrd.debug?.anchor_matched_count ?? 0,
+          assignedReads: fileAssigned,
+          ambiguousReads: mrd.ambiguous_read_count ?? 0,
+        },
+        genes: fileGenes,
+      });
+    }
+
+    try {
+      await this.excelExportService.exportToExcel(this.lastRunParams, scopes);
+      this.addLog('Excel report exported successfully.');
+    } catch (e: any) {
+      console.error('Excel export failed:', e);
+      this.addLog(`Excel export failed: ${e.message}`);
+    }
   }
 }

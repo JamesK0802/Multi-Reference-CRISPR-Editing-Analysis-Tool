@@ -45,6 +45,7 @@ def run_analysis_on_reads(data, targets, phred_threshold=10, indel_threshold=1.0
     total_reads = len(data)
     target_results_list = []
 
+    print(f"  [RUN_ANALYSIS_ON_READS] Starting analysis for {len(targets)} targets on {len(data)} reads.")
     for target in targets:
         target_id     = target.get("target_id")
         reference_seq = target.get("reference_seq")
@@ -52,15 +53,22 @@ def run_analysis_on_reads(data, targets, phred_threshold=10, indel_threshold=1.0
         window_size   = target.get("window_size", 90)
 
         if not reference_seq:
+            print(f"  [WARNING] Target {target_id} has no reference sequence, skipping.")
             continue
 
         # ── Step 1: Locate gRNA in reference ──────────────────────────────────
         ref_sgrna_start, is_rc_in_ref = find_target_in_reference(reference_seq, sgrna_seq)
+
         if ref_sgrna_start == -1:
-            print(f"  [WARNING] Target {target_id} not found in reference!")
+            print(f"  [CRITICAL WARNING] Target '{target_id}' gRNA '{sgrna_seq}' NOT FOUND in reference (len={len(reference_seq)})!")
+            target_results_list.append({
+                "target_id": target_id,
+                "error": "gRNA not found in reference",
+                "summary": {"total_reads": len(data), "matched_reads": 0, "aligned_reads": 0}
+            })
             continue
 
-        print(f"  [DEBUG] Target '{target_id}' found at idx {ref_sgrna_start} (RC={is_rc_in_ref})")
+        print(f"  [DEBUG] Processing Target '{target_id}' at idx {ref_sgrna_start} (RC={is_rc_in_ref})")
 
         # ── Step 2: Build reference window ────────────────────────────────────
         ref_cut_site = calculate_cut_site(ref_sgrna_start, sgrna_seq, is_rc=is_rc_in_ref)
@@ -252,10 +260,10 @@ def run_analysis_on_reads(data, targets, phred_threshold=10, indel_threshold=1.0
                 "read_ambiguous":   counts["read_ambiguous"]
             },
             "breakdown": {
-                "out_of_frame": counts["out_of_frame"],
-                "in_frame":     counts["in_frame"],
-                "no_indel":     counts["no_indel"],
-                "substitution": counts["substitution"],
+                "out_of_frame": new_out_of_frame,
+                "in_frame":     new_in_frame_reads,
+                "no_indel":     new_no_indel - new_substitution, # Pure no-indel (unmodified)
+                "substitution": new_substitution,
                 "ambiguous":    counts["fail_quality"] + counts["fail_similarity"],
             },
             "target_id":        target_id,
@@ -331,10 +339,13 @@ def run_multi_reference_analysis(fastq_file, genes_payload, assignment_margin_th
         "ambiguous_read_count": ambiguous_reads_count,
         "debug": {
             "total_reads_parsed": total_reads_initial,
+            "phred_passed_count": demux_result.get("debug_logs", {}).get("phred_passed_count", 0),
+            "anchor_matched_count": demux_result.get("debug_logs", {}).get("anchor_matched_count", 0),
             "assignment_margin_threshold_used": assignment_margin_threshold,
             "genes": []
         }
     }
+    print(f"DEBUG: total_initial={total_reads_initial}, usable={output['debug']['usable_count']}")
     
     # Run analysis for each gene bucket
     for gene_bucket in demux_result["genes"]:
@@ -505,6 +516,8 @@ def process_files_multi(file_paths, genes_payload, data_type="single-end", phred
             "ambiguous_read_count": ambiguous_count,
             "debug": {
                 "total_reads_parsed": total_reads,
+                "phred_passed_count": demux_result.get("debug_logs", {}).get("phred_passed_count", 0),
+                "anchor_matched_count": demux_result.get("debug_logs", {}).get("anchor_matched_count", 0),
                 "assignment_margin_threshold_used": margin_threshold,
                 "genes": []
             }
