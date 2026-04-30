@@ -604,7 +604,7 @@ def process_files_multi(file_paths, genes_payload, data_type="single-end", phred
                 
                 for c in clusters:
                     cluster_reads = c[3]
-                    if len(cluster_reads) < 3:
+                    if len(cluster_reads) < 20:
                         unresolved_reads.extend(cluster_reads)
                         continue
                         

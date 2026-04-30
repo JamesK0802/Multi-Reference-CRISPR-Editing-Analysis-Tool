@@ -1,0 +1,229 @@
+<!-- ══════════════ RESULTS DASHBOARD ══════════════ -->
+<div *ngIf="state.genes.length > 0" class="results-dashboard" id="resultsSection">
+
+  <!-- ── Export / Action Bar ── -->
+  <div class="export-bar">
+    <button *ngIf="state.activeMode === 'analysis'" type="button" class="btn-new-analysis"
+      (click)="state.newAnalysis()">
+      <span class="btn-icon"></span> New Analysis
+    </button>
+    <button *ngIf="state.activeMode === 'viewer'" type="button" class="btn-new-analysis" (click)="state.newViewer()">
+      <span class="btn-icon"></span> New View
+    </button>
+    <span class="button-divider">&nbsp; </span>
+    <button type="button" class="btn-export" (click)="state.exportToExcel()"
+      [disabled]="state.mergedGenes.length === 0">
+      <span class="export-icon"></span> Export Excel
+    </button>
+  </div>
+
+  <!-- ── Result Scope Tabs (Merged vs Per-File) ── -->
+  <div class="result-scope-wrapper" *ngIf="state.isMultiReference && state.multiFileCount > 1">
+    <div class="scope-tabs">
+      <button type="button" class="scope-tab-btn" [class.active]="state.selectedScopeIndex === -1"
+        (click)="selectScope(-1)">
+        <span class="scope-icon">📁</span> All Merged
+      </button>
+      <button type="button" class="scope-tab-btn" *ngFor="let res of state.allFileResults; let i = index"
+        [class.active]="state.selectedScopeIndex === i" (click)="selectScope(i)">
+        {{ state.getScopeName(i) }}
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Gene Tabs (Multi-Reference only) ── -->
+  <div *ngIf="state.genes.length >= 1" class="gene-tabs-wrapper">
+    <div class="gene-tabs" role="tablist">
+      <button *ngFor="let g of state.normalGenes; let i = index" role="tab" class="gene-tab-btn"
+        [class.active]="state.genes.indexOf(g) === state.selectedGeneIndex"
+        (click)="selectGene(state.genes.indexOf(g))">
+        <span class="gene-tab-label">{{ g.gene }}</span>
+        <span class="gene-tab-count">{{ g.assigned_read_count | number }} reads</span>
+      </button>
+
+      <button *ngFor="let g of state.rescuedGenes; let i = index" role="tab" class="gene-tab-btn rescued-derived"
+        [class.active]="state.genes.indexOf(g) === state.selectedGeneIndex" (click)="selectGene(state.genes.indexOf(g))"
+        style="background-color: #e8f5e9; border-color: #a5d6a7;">
+        <span class="gene-tab-label">{{ g.gene }}</span>
+        <span class="gene-tab-count">{{ g.assigned_read_count | number }} reads</span>
+      </button>
+
+      <button *ngFor="let g of state.ambiguousGenes; let i = index" role="tab" class="gene-tab-btn ambiguous-derived"
+        [class.active]="state.genes.indexOf(g) === state.selectedGeneIndex"
+        (click)="selectGene(state.genes.indexOf(g))">
+        <span class="gene-tab-label">{{ g.gene }}</span>
+        <span class="gene-tab-count">{{ g.assigned_read_count | number }} reads</span>
+      </button>
+    </div>
+    <div class="gene-info-stripe" *ngIf="state.currentGene">
+      <span class="gene-info-item"><strong>Gene:</strong> {{ state.currentGene.gene }}</span>
+      <span class="gene-info-sep">|</span>
+      <span class="gene-info-item"><strong>Assigned Reads:</strong> {{ state.currentGene.assigned_read_count | number
+        }}</span>
+      <span class="gene-info-sep">|</span>
+      <span class="gene-info-item ambiguous"><strong>Ambiguous Excluded:</strong> {{ state.ambiguousReadCount | number
+        }}</span>
+      <span class="gene-info-sep">|</span>
+      <span class="gene-info-item"><strong>Raw Read:</strong> {{ state.totalRawReads | number }}</span>
+      <span class="gene-info-sep">|</span>
+      <span class="gene-info-item"><strong>Phred Passed:</strong> {{ state.totalPhredPassed | number }}</span>
+      <span class="gene-info-sep">|</span>
+      <span class="gene-info-item"><strong>Anchor Matched:</strong> {{ state.totalAnchorMatched | number }}</span>
+      <span class="gene-info-sep" *ngIf="state.multiFileCount > 1">|</span>
+      <span class="gene-info-item" *ngIf="state.multiFileCount > 1">
+        <strong>Source:</strong> {{ state.selectedScopeIndex === -1 ? 'All Merged' :
+        state.getScopeName(state.selectedScopeIndex) }}
+      </span>
+    </div>
+  </div>
+
+  <!-- ── Metric Cards ── -->
+  <div class="metrics-grid">
+    <div class="metric-card">
+      <span class="m-label">Total Reads</span>
+      <span class="m-value">{{ state.metrics.totalReads | number }}</span>
+    </div>
+    <div class="metric-card">
+      <span class="m-label">Aligned Reads</span>
+      <span class="m-value">{{ state.metrics.alignedReads | number }}</span>
+    </div>
+    <div class="metric-card out-of-frame">
+      <span class="m-label">Out-of-frame %</span>
+      <span class="m-value">{{ state.metrics.avgOutOfFrame | number:'1.1-2' }}%</span>
+    </div>
+    <div class="metric-card in-frame">
+      <span class="m-label">In-frame %</span>
+      <span class="m-value">{{ state.metrics.avgInFrame | number:'1.1-2' }}%</span>
+    </div>
+    <div class="metric-card no-indel">
+      <span class="m-label">Unmodified %</span>
+      <span class="m-value">{{ (state.metrics.avgNoIndel - state.metrics.avgSubstitution) | number:'1.1-2' }}%</span>
+    </div>
+    <div class="metric-card sub">
+      <span class="m-label">Substitution %</span>
+      <span class="m-value">{{ state.metrics.avgSubstitution | number:'1.1-2' }}%</span>
+    </div>
+  </div>
+
+  <!-- ── Charts ── -->
+  <div class="charts-section">
+    <div class="chart-card pie"><canvas id="mutationPieChart"></canvas></div>
+    <div class="chart-card"><canvas id="indelChart"></canvas></div>
+    <div class="chart-card donut"><canvas id="donutChart"></canvas></div>
+  </div>
+
+  <!-- ── Summary Table ── -->
+  <div class="table-card">
+    <h3>Detailed Summary Table
+      <span class="table-gene-badge">{{ state.currentGene?.gene }}</span>
+    </h3>
+    <div class="table-responsive">
+      <table>
+        <thead>
+          <tr>
+            <th>Gene</th>
+            <th>Target</th>
+            <th>Total</th>
+            <th>Aligned</th>
+            <th>Out-of-frame %</th>
+            <th>In-frame %</th>
+            <th>Unmodified %</th>
+            <th>Sub %</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let row of summaryTableData; let i = index" (click)="selectRow(i)"
+            [class.row-selected]="i === state.selectedRowIndex"
+            style="cursor: pointer; transition: background-color 0.2s;">
+            <td>{{ row.sample }}</td>
+            <td><span class="badge">{{ row.target }}</span></td>
+            <td>{{ row.total | number }}</td>
+            <td>{{ row.matched | number }}</td>
+            <td><strong>{{ row.outOfFrame | number:'1.1-2' }}%</strong></td>
+            <td>{{ row.inFrame | number:'1.1-2' }}%</td>
+            <td>{{ (row.noIndel - row.substitution) | number:'1.1-2' }}%</td>
+            <td>{{ row.substitution | number:'1.1-2' }}%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ ANNOTATION PANEL ══════════════ -->
+<div class="annotation-panel"
+  *ngIf="state.selectedTarget && state.selectedTarget.top_groups && state.selectedTarget.top_groups.length > 0">
+  <div class="anno-header">
+    <div>
+      <h2>ANNOTATION</h2>
+      <span style="font-size:0.8rem;color:#1a9e55;font-weight:600;">
+        {{ state.currentGene?.gene }} › {{ state.selectedTarget?.target_id }}
+      </span>
+    </div>
+    <div class="anno-legend">
+      <span class="legend-item"><span class="badge del-bg">-</span> DELETION</span>
+      <span class="legend-item"><span class="badge sub-bg">A</span> SUBSTITUTION</span>
+      <span class="legend-item"><span class="badge ins-badge">A</span> INSERTION</span>
+    </div>
+  </div>
+
+  <div class="unified-anno-container">
+    <div class="unified-table">
+
+      <!-- Reference Row -->
+      <div class="unified-row" style="border-bottom: 2px solid #f1f2f6;">
+        <div class="sticky-left">REFERENCE 5'→3'</div>
+        <div class="seq-center">
+          <div class="grna-track"
+            *ngIf="state.selectedTarget.grna_start_index !== undefined && state.selectedTarget.grna_start_index !== -1">
+            <div style="position: absolute; display: flex; bottom: 2px; border-bottom: 2px solid #34495e;"
+              [style.left.px]="state.selectedTarget.grna_start_index * 13">
+              <span class="base-box"
+                *ngFor="let char of (state.selectedTarget.display_sgrna_seq || state.selectedTarget.sgrna_seq || '').split('')"
+                style="font-size: 11px; font-weight: 800; color: #34495e; font-family: monospace;">{{ char }}</span>
+            </div>
+          </div>
+          <div class="seq-mono ref-seq" style="display: flex; height: 16px;">
+            <span class="base-box text-box"
+              *ngFor="let char of (state.selectedTarget.ref_sequence || '').split(''); let i = index"
+              [style.color]="(state.selectedTarget.grna_start_index >= 0 && i >= state.selectedTarget.grna_start_index && i < state.selectedTarget.grna_start_index + (state.selectedTarget.sgrna_seq?.length || 0)) ? '#3498db' : '#333'"
+              [style.font-weight]="(state.selectedTarget.grna_start_index >= 0 && i >= state.selectedTarget.grna_start_index && i < state.selectedTarget.grna_start_index + (state.selectedTarget.sgrna_seq?.length || 0)) ? 'bold' : 'normal'">
+              {{ char }}
+            </span>
+          </div>
+        </div>
+        <div class="sticky-right"></div>
+      </div>
+
+      <!-- Mutation Group Rows -->
+      <div class="unified-row" *ngFor="let group of state.selectedTarget.top_groups"
+        style="border-bottom: 1px dotted #e0e0e0; background: white;">
+        <div class="sticky-left">GROUP {{ group.group_rank }}</div>
+        <div class="seq-center" style="padding: 10px 15px 23px 15px; display: flex; align-items: flex-start;">
+          <div class="seq-mono read-seq" style="display: flex; height: 16px;">
+            <ng-container *ngFor="let t of group.tokens">
+              <ng-container *ngIf="t.type === 'equal'">
+                <span class="base-box text-box" *ngFor="let char of t.val.split('')">{{ char }}</span>
+              </ng-container>
+              <ng-container *ngIf="t.type === 'substitute'">
+                <span class="base-box sub-bg" *ngFor="let char of t.val.split('')">{{ char }}</span>
+              </ng-container>
+              <ng-container *ngIf="t.type === 'delete'">
+                <span class="base-box del-bg" *ngFor="let char of t.val.split('')">-</span>
+              </ng-container>
+              <span *ngIf="t.type === 'insert'" class="ins-wrapper" [attr.data-ins]="t.val"></span>
+            </ng-container>
+          </div>
+        </div>
+        <div class="sticky-right" style="display: flex; align-items: center; font-size: 11px;">
+          <div style="line-height: 1.4;">
+            <strong>TYPE: {{ group.classification }}{{ group.net_indel ? ' (' + group.net_indel + ' bp)' : ' (0 bp)'
+              }}</strong><br>
+            <span style="color:#7f8c8d;">{{ group.read_count | number }} Reads &nbsp;·&nbsp; {{ group.read_pct
+              }}%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

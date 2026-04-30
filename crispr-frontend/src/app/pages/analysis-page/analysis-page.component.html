@@ -1,0 +1,168 @@
+<div class="analysis-page">
+  <app-result-dashboard *ngIf="state.genes.length > 0"></app-result-dashboard>
+
+  <!-- ══════════════ CONFIGURATION FORM ══════════════ -->
+  <form [formGroup]="state.analysisForm" (ngSubmit)="runAnalysis()"
+    *ngIf="!state.isLoading && state.genes.length === 0">
+    <div class="config-section">
+      <div class="upload-zone" [class.dragging]="state.isDragging" (drop)="onFileDropped($event)"
+        (dragover)="onDragOver($event)" (dragleave)="onDragLeave($event)" (click)="fileInput.click()">
+        <input type="file" #fileInput (change)="onFileSelected($event)" multiple hidden accept=".fastq,.fq" />
+        <div class="upload-icon">📁</div>
+        <p><strong>Drag & Drop FASTQ files</strong> or click to browse</p>
+        <span class="hint">Supports Illumina .fastq / .fq files · Multiple files allowed</span>
+      </div>
+
+      <div class="file-list" *ngIf="state.selectedFiles.length > 0">
+        <div *ngFor="let file of state.selectedFiles; let i = index" class="file-item">
+          <span class="file-name">{{ file.name }}</span>
+          <span class="file-size">({{ file.size / 1024 / 1024 | number:'1.1-1' }} MB)</span>
+          <button type="button" class="btn-remove" (click)="removeFile(i)">&times;</button>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group flex-wide">
+          <label>Window Size (bp)</label>
+          <select formControlName="interestRegion" class="form-control">
+            <option [value]="50">50</option>
+            <option [value]="70">70</option>
+            <option [value]="90">90</option>
+            <option [value]="110">110</option>
+            <option [value]="130">130</option>
+          </select>
+        </div>
+        <div class="form-group flex-wide">
+          <label>Data Filtering Level</label>
+          <select formControlName="phredLevel" class="form-control">
+            <option [value]="1">Level 1 (Light - 10)</option>
+            <option [value]="2">Level 2 (Normal - 20)</option>
+            <option [value]="3">Level 3 (Strict - 30)</option>
+            <option [value]="4">Level 4 (High - 40)</option>
+            <option [value]="5">Level 5 (Elite - 50)</option>
+          </select>
+        </div>
+        <div class="form-group flex-wide">
+          <label>Assignment Margin (%)</label>
+          <select formControlName="marginPercent" class="form-control">
+            <option [value]="1">1%</option>
+            <option [value]="2">2%</option>
+            <option [value]="3">3%</option>
+            <option [value]="4">4%</option>
+            <option [value]="5">5%</option>
+          </select>
+        </div>
+        <div class="form-group flex-wide">
+          <label>Indel Threshold (%)</label>
+          <select formControlName="indelPercent" class="form-control">
+            <option [value]="1">1%</option>
+            <option [value]="2">2%</option>
+            <option [value]="3">3%</option>
+            <option [value]="4">4%</option>
+            <option [value]="5">5%</option>
+          </select>
+        </div>
+        <div class="form-group toggle-group flex-narrow">
+          <label for="ambiguousToggle">Analyze Ambiguous</label>
+          <div class="toggle-control">
+            <input type="checkbox" formControlName="analyzeAmbiguous" id="ambiguousToggle" />
+            <span class="toggle-slider"></span>
+          </div>
+        </div>
+        <div class="form-group toggle-group flex-narrow"
+          [class.disabled]="!state.analysisForm.get('analyzeAmbiguous')?.value">
+          <label for="rescueToggle">Rescue Ambiguous</label>
+          <div class="toggle-control">
+            <input type="checkbox" formControlName="rescueAmbiguous" id="rescueToggle" />
+            <span class="toggle-slider"></span>
+          </div>
+        </div>
+      </div>
+
+      <hr class="divider" />
+
+      <div class="targets-section">
+        <div class="section-header">
+          <h2>Reference Configuration</h2>
+          <div class="header-actions">
+            <button type="button" class="btn-add" (click)="state.addGene()">+ Add Gene</button>
+          </div>
+        </div>
+        <div formArrayName="genes">
+          <div *ngFor="let gene of state.geneBlocks.controls; let gi = index" [formGroupName]="gi"
+            class="gene-block-card">
+            <div class="gene-block-header">
+              <div class="gene-block-title">
+                <span>Gene {{ gi + 1 }}</span>
+              </div>
+              <button type="button" class="btn-remove-target" (click)="state.removeGene(gi)"
+                *ngIf="state.geneBlocks.length > 1">Remove Gene</button>
+            </div>
+            <div class="gene-block-body">
+              <div class="form-row" style="gap:15px; margin-bottom:12px;">
+                <div class="form-group" style="flex:0 0 200px;">
+                  <label>Gene Name:</label>
+                  <input type="text" formControlName="gene_name" placeholder="e.g. GeneA" />
+                </div>
+                <div class="form-group full">
+                  <label>Reference Sequence:</label>
+                  <textarea formControlName="gene_reference" rows="3" class="monospaced"></textarea>
+                </div>
+              </div>
+              <div class="gene-targets-section">
+                <div class="gene-targets-header">
+                  <span class="gene-targets-label">Targets within this gene</span>
+                  <button type="button" class="btn-add-small" (click)="state.addGeneTarget(gi)">+ Add Target</button>
+                </div>
+                <div formArrayName="geneTargets">
+                  <div *ngFor="let gt of state.getGeneTargets(gi).controls; let ti = index" [formGroupName]="ti"
+                    class="gene-target-row">
+                    <span class="gene-target-num">T{{ ti + 1 }}</span>
+                    <div class="form-group" style="flex:0 0 180px;">
+                      <label>Target Name:</label>
+                      <input type="text" formControlName="target_id" />
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                      <label>gRNA Sequence:</label>
+                      <input type="text" formControlName="gRNA" />
+                    </div>
+                    <button type="button" class="btn-remove" (click)="state.removeGeneTarget(gi, ti)"
+                      *ngIf="state.getGeneTargets(gi).length > 1" style="margin-top:20px;">&times;</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" [disabled]="state.isLoading || (state.selectedFiles.length === 0)" class="btn-primary">
+        Start CRISPR Analysis
+      </button>
+    </div>
+  </form>
+
+  <!-- ── Progress Section ── -->
+  <div class="progress-section" *ngIf="state.isLoading">
+    <div class="progress-header">
+      <span class="stage-text">{{ state.progressStage$ | async }}</span>
+      <span class="percent-text">{{ (state.progressDisplay$ | async) | number:'1.0-0' }}%</span>
+    </div>
+    <div class="progress-bar-bg">
+      <div class="progress-bar-fill" [style.width.%]="state.progressDisplay$ | async"></div>
+    </div>
+  </div>
+
+  <div *ngIf="state.error" class="error-box">
+    <strong>Error:</strong> {{ state.error }}
+  </div>
+
+  <div class="status-log-container" *ngIf="state.debugLogs.length > 0">
+    <div class="status-log">
+      <div class="log-title">Communication Log:</div>
+      <div class="log-entries">
+        <div *ngFor="let log of state.debugLogs" class="log-entry">{{ log }}</div>
+      </div>
+    </div>
+  </div>
+</div>
