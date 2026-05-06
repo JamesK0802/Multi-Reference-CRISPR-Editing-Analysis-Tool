@@ -1,7 +1,7 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, APIRouter
 import core.classifier as classifier
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List
+from typing import List, Optional
 import os
 import json
 import shutil
@@ -17,7 +17,9 @@ pcr_presets.init_db()
 from run_local import process_files, process_files_multi
 
 app = FastAPI(title="CRISPR Analysis API")
-app.include_router(pcr_presets.router, prefix="/api")
+
+# ── Main API Router ──────────────────────────────────────────────────────────
+api_router = APIRouter(prefix="/api")
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,7 +31,7 @@ app.add_middleware(
 # ── In-Memory Task Storage ────────────────────────────────────────────────────
 tasks = {}
 
-@app.get("/status/{task_id}")
+@api_router.get("/status/{task_id}")
 async def get_task_status(task_id: str):
     print(f"[DEBUG] Status checked for {task_id}")
     if task_id not in tasks:
@@ -38,283 +40,242 @@ async def get_task_status(task_id: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Existing CRISPR Analysis endpoint (unchanged)
+# Existing CRISPR Analysis endpoint
 # ─────────────────────────────────────────────────────────────────────────────
 
 def background_analysis(
     task_id: str,
-    temp_dir: str,
-    file_paths: List[str],
-    target_payload: List[dict],
-    data_type: str,
-    phred_threshold: int,
+    gene_name: str,
+    target_seq: str,
+    files: List[str],
+    window_size: int,
+    assignment_margin: int,
     indel_threshold: float,
-    is_multi_reference: bool = False,
-    margin_threshold: float = 0.05,
-    analyze_ambiguous: bool = False,
-    rescue_ambiguous: bool = False,
-    rescue_threshold: int = 20
+    phred_threshold: int,
+    rescue_ambiguous: bool
 ):
-    print(f"[DEBUG] Background thread started for task {task_id}")
     try:
-        def update_progress(percent: int, stage: str):
-            tasks[task_id]["progress"] = percent
-            tasks[task_id]["stage"] = stage
-
-        update_progress(0, "Backend thread started")
-
-        if is_multi_reference:
-            results = process_files_multi(
-                file_paths, target_payload,
-                data_type=data_type,
-                phred_threshold=phred_threshold,
-                indel_threshold=indel_threshold,
-                margin_threshold=margin_threshold,
-                progress_callback=update_progress,
-                analyze_ambiguous=analyze_ambiguous,
-                rescue_ambiguous=rescue_ambiguous,
-                rescue_threshold=rescue_threshold
+        tasks[task_id]["status"] = "running"
+        tasks[task_id]["stage"] = "Processing FASTQ files..."
+        
+        # Determine if we should use multi-file processing or single
+        # In the new UI, we always send as a list, but we might want to preserve the logic
+        
+        results = process_files_multi(
+            gene_name=gene_name,
+            target_seq=target_seq,
+            fastq_paths=files,
+            window_size=window_size,
+            assignment_margin=assignment_margin,
+            indel_threshold=indel_threshold,
+            phred_threshold=phred_threshold,
+            rescue_ambiguous=rescue_ambiguous,
+            progress_callback=lambda p, s: (
+                tasks[task_id].update({"progress": p, "stage": s})
             )
-        else:
-            results = process_files(
-                file_paths, target_payload,
-                data_type=data_type,
-                phred_threshold=phred_threshold,
-                indel_threshold=indel_threshold,
-                progress_callback=update_progress
-            )
-
+        )
+        
+        tasks[task_id]["status"] = "completed"
+        tasks[task_id]["result"] = results
         tasks[task_id]["progress"] = 100
-        tasks[task_id]["stage"]    = "Completed"
-        tasks[task_id]["result"]   = results
-        print(f"[DEBUG] Task {task_id} completed.")
-
+        tasks[task_id]["stage"] = "Done"
+        
     except Exception as e:
-        print(f"[ERROR] Task {task_id} failed: {str(e)}. import traceback; traceback.print_exc()")
-        import traceback; traceback.print_exc()
+        import traceback
+        error_msg = f"{str(e)}\n{traceback.format_exc()}"
+        print(f"[ERROR] Analysis failed: {error_msg}")
         tasks[task_id]["status"] = "failed"
-        tasks[task_id]["error"]  = str(e)
+        tasks[task_id]["error"] = str(e)
     finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        # Cleanup temp files
+        for f in files:
+            if os.path.exists(f) and "/tmp" in f:
+                try: os.remove(f)
+                except: pass
 
-@app.post("/analyze")
+@api_router.post("/analyze")
 async def run_analysis_endpoint(
     background_tasks: BackgroundTasks,
+    gene_name: str = Form(...),
+    target_seq: str = Form(...),
     files: List[UploadFile] = File(...),
-    data_type: str = Form("single-end"),
-    interest_region: int = Form(90),
-    phred_threshold: int = Form(10),
+    window_size: int = Form(20),
+    assignment_margin: int = Form(2),
     indel_threshold: float = Form(1.0),
-    targets: str = Form(...),
-    is_multi_reference: bool = Form(False),
-    assignment_margin_threshold: float = Form(0.05),
-    analyze_ambiguous: bool = Form(False),
-    rescue_ambiguous: bool = Form(False),
-    rescue_threshold: int = Form(20)
+    phred_threshold: int = Form(20),
+    rescue_ambiguous: bool = Form(True)
 ):
-    clamped_interest = max(60, min(120, interest_region))
-    print(f"[DEBUG] /analyze — files: {len(files)}, multi_ref: {is_multi_reference}")
-    task_id  = str(uuid.uuid4())
-    temp_dir = tempfile.mkdtemp()
-    file_paths = []
+    task_id = str(uuid.uuid4())
+    tasks[task_id] = {
+        "status": "pending",
+        "progress": 0,
+        "stage": "Initializing...",
+        "result": None
+    }
 
-    tasks[task_id] = {"status": "processing", "progress": 0,
-                      "stage": "Upload received", "result": None}
+    # Save uploaded files to temp locations
+    temp_paths = []
+    temp_dir = tempfile.gettempdir()
+    for f in files:
+        safe_name = f"{uuid.uuid4()}_{f.filename}"
+        path = os.path.join(temp_dir, safe_name)
+        with open(path, "wb") as buffer:
+            shutil.copyfileobj(f.file, buffer)
+        temp_paths.append(path)
 
-    try:
-        for file in files:
-            fp = os.path.join(temp_dir, file.filename)
-            with open(fp, "wb") as buf:
-                shutil.copyfileobj(file.file, buf)
-            file_paths.append(fp)
+    background_tasks.add_task(
+        background_analysis,
+        task_id,
+        gene_name,
+        target_seq,
+        temp_paths,
+        window_size,
+        assignment_margin,
+        indel_threshold,
+        phred_threshold,
+        rescue_ambiguous
+    )
 
-        raw_targets = json.loads(targets)
-        if is_multi_reference:
-            parsed_payload = raw_targets
-        else:
-            parsed_payload = [
-                {
-                    "target_id":    t.get("target_id"),
-                    "sgrna_seq":    t.get("gRNA"),
-                    "reference_seq": t.get("reference_sequence"),
-                    "window_size":  clamped_interest
-                }
-                for t in raw_targets
-            ]
-
-        background_tasks.add_task(
-            background_analysis, task_id, temp_dir, file_paths,
-            parsed_payload, data_type, phred_threshold,
-            indel_threshold,
-            is_multi_reference,
-            assignment_margin_threshold,
-            analyze_ambiguous,
-            rescue_ambiguous,
-            rescue_threshold
-        )
-        return {"task_id": task_id}
-
-    except Exception as e:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    return {"task_id": task_id}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Benchmark endpoints (NEW — completely separate from CRISPR analysis)
+# Benchmark Endpoints
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _parse_benchmark_reads(file_path: str) -> List[tuple]:
-    """Parse a FASTQ file and return list of (seq, qual) tuples."""
-    from core.parser import parse_fastq
-    return parse_fastq(file_path)
+@api_router.post("/benchmark/split")
+async def benchmark_split_preview(
+    target_seq: str = Form(...),
+    files: List[UploadFile] = File(...),
+    test_ratio: float = Form(0.2)
+):
+    """Synchronous preview of train/test split counts."""
+    # Temporarily save files to count reads
+    total_reads = 0
+    temp_dir = tempfile.gettempdir()
+    for f in files:
+        path = os.path.join(temp_dir, f"{uuid.uuid4()}_{f.filename}")
+        with open(path, "wb") as buffer:
+            shutil.copyfileobj(f.file, buffer)
+        
+        # Simple read count (every 4th line in FASTQ)
+        with open(path, "r") as r:
+            total_reads += sum(1 for line in r) // 4
+        os.remove(path)
 
+    test_count = int(total_reads * test_ratio)
+    train_count = total_reads - test_count
+
+    return {
+        "total": total_reads,
+        "train": train_count,
+        "test": test_count
+    }
 
 def background_benchmark(
     task_id: str,
-    temp_dir: str,
-    dataset: List[dict],          # [{gene, target, reference, grna, file_path}]
-    phred_threshold: float,
-    window: int,
-    margin: float,
-    subset: str,                  # 'train' | 'test'
-    seed: int = 42
+    target_seq: str,
+    files: List[str],
+    test_ratio: float,
+    window_size: int,
+    phred_threshold: int
 ):
-    """Background worker for benchmark run."""
-    print(f"[BENCHMARK] Task {task_id} started — subset={subset}")
     try:
-        from core.benchmark import run_benchmark
-
-        def update_progress(pct: int, stage: str):
-            tasks[task_id]["progress"] = pct
-            tasks[task_id]["stage"]    = stage
-            print(f"[BENCHMARK] {pct}% — {stage}")
-
-        # Load reads for each dataset row
-        enriched = []
-        for i, row in enumerate(dataset):
-            fp    = row["file_path"]
-            reads = _parse_benchmark_reads(fp) if os.path.exists(fp) else []
-            enriched.append({
-                "gene":      row["gene"],
-                "target":    row["target"],
-                "reference": row["reference"],
-                "grna":      row["grna"],
-                "reads":     reads
-            })
-            update_progress(
-                int((i + 1) / len(dataset) * 5),
-                f"Loaded {len(reads):,} reads for {row['gene']} › {row['target']}"
-            )
-
-        result = run_benchmark(
-            dataset=enriched,
+        from core.benchmark import run_benchmarking
+        
+        tasks[task_id]["status"] = "running"
+        
+        results = run_benchmarking(
+            target_seq=target_seq,
+            fastq_paths=files,
+            test_ratio=test_ratio,
+            window_size=window_size,
             phred_threshold=phred_threshold,
-            window=window,
-            margin=margin,
-            subset=subset,
-            seed=seed,
-            progress_callback=update_progress
+            progress_callback=lambda p, s: tasks[task_id].update({"progress": p, "stage": s})
         )
 
+        tasks[task_id]["status"] = "completed"
+        tasks[task_id]["result"] = results
         tasks[task_id]["progress"] = 100
-        tasks[task_id]["stage"]    = "Benchmark Complete"
-        tasks[task_id]["result"]   = result
-        print(f"[BENCHMARK] Task {task_id} complete.")
-
     except Exception as e:
-        import traceback; traceback.print_exc()
+        import traceback
+        print(traceback.format_exc())
         tasks[task_id]["status"] = "failed"
-        tasks[task_id]["error"]  = str(e)
+        tasks[task_id]["error"] = str(e)
     finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        for f in files:
+            if os.path.exists(f): os.remove(f)
 
-
-@app.post("/benchmark/split")
-async def benchmark_split_preview(
-    files: List[UploadFile] = File(...),
-    dataset: str = Form(...)     # JSON: [{gene, target, reference, grna}] parallel to files[]
-):
-    """
-    Fast preview: returns train/test read counts per row without running analysis.
-    No task_id — responds synchronously.
-    """
-    from core.benchmark import run_split_preview
-
-    temp_dir   = tempfile.mkdtemp()
-    rows_meta  = json.loads(dataset)   # [{gene, target, reference, grna}]
-    enriched   = []
-
-    try:
-        for i, (file, meta) in enumerate(zip(files, rows_meta)):
-            fp = os.path.join(temp_dir, f"row_{i}_{file.filename}")
-            with open(fp, "wb") as buf:
-                shutil.copyfileobj(file.file, buf)
-            reads = _parse_benchmark_reads(fp)
-            enriched.append({
-                "gene":    meta["gene"],
-                "target":  meta["target"],
-                "reference": meta["reference"],
-                "grna":    meta["grna"],
-                "reads":   reads
-            })
-
-        result = run_split_preview(enriched)
-        return result
-
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-
-@app.post("/benchmark/run")
-async def benchmark_run(
+@api_router.post("/benchmark/run")
+async def run_benchmark_endpoint(
     background_tasks: BackgroundTasks,
+    target_seq: str = Form(...),
     files: List[UploadFile] = File(...),
-    dataset: str = Form(...),    # JSON: [{gene, target, reference, grna}] parallel to files[]
-    phred: float = Form(10.0),
-    window: int  = Form(90),
-    margin: float = Form(0.05),
-    subset: str  = Form("train"),
-    seed: int    = Form(42)
+    test_ratio: float = Form(0.2),
+    window_size: int = Form(20),
+    phred_threshold: int = Form(20)
 ):
-    """
-    Run classification benchmark on the train OR test subset.
-    Returns a task_id for polling.
-    """
-    print(f"[BENCHMARK] /benchmark/run — subset={subset}, files={len(files)}")
-    task_id  = str(uuid.uuid4())
-    temp_dir = tempfile.mkdtemp()
+    task_id = str(uuid.uuid4())
+    tasks[task_id] = {
+        "status": "pending",
+        "progress": 0,
+        "stage": "Queueing benchmark...",
+        "result": None
+    }
 
-    tasks[task_id] = {"status": "processing", "progress": 0,
-                      "stage": "Uploading files…", "result": None}
+    temp_paths = []
+    temp_dir = tempfile.gettempdir()
+    for f in files:
+        path = os.path.join(temp_dir, f"{uuid.uuid4()}_{f.filename}")
+        with open(path, "wb") as buffer:
+            shutil.copyfileobj(f.file, buffer)
+        temp_paths.append(path)
 
-    try:
-        rows_meta = json.loads(dataset)
-        dataset_with_paths = []
+    background_tasks.add_task(
+        background_benchmark,
+        task_id,
+        target_seq,
+        temp_paths,
+        test_ratio,
+        window_size,
+        phred_threshold
+    )
 
-        for i, (file, meta) in enumerate(zip(files, rows_meta)):
-            fp = os.path.join(temp_dir, f"row_{i}_{file.filename}")
-            with open(fp, "wb") as buf:
-                shutil.copyfileobj(file.file, buf)
-            dataset_with_paths.append({
-                "gene":      meta["gene"],
-                "target":    meta["target"],
-                "reference": meta["reference"],
-                "grna":      meta["grna"],
-                "file_path": fp
-            })
+    return {"task_id": task_id}
 
-        background_tasks.add_task(
-            background_benchmark,
-            task_id, temp_dir, dataset_with_paths,
-            phred, window, margin, subset, seed
-        )
-        return {"task_id": task_id}
 
-    except Exception as e:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        tasks[task_id]["status"] = "failed"
-        tasks[task_id]["error"]  = str(e)
-        raise HTTPException(status_code=500, detail=str(e))
+# ─────────────────────────────────────────────────────────────────────────────
+# Include Routers
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Include PCR presets router into our api_router
+api_router.include_router(pcr_presets.router)
+
+# Include the main api_router into the app
+app.include_router(api_router)
+
+# ── Legacy Redirects (Optional) ──────────────────────────────────────────────
+@app.get("/status/{task_id}", include_in_schema=False)
+async def legacy_status(task_id: str):
+    return await get_task_status(task_id)
+
+@app.post("/analyze", include_in_schema=False)
+async def legacy_analyze(
+    background_tasks: BackgroundTasks,
+    gene_name: str = Form(...),
+    target_seq: str = Form(...),
+    files: List[UploadFile] = File(...),
+    window_size: int = Form(20),
+    assignment_margin: int = Form(2),
+    indel_threshold: float = Form(1.0),
+    phred_threshold: int = Form(20),
+    rescue_ambiguous: bool = Form(True)
+):
+    return await run_analysis_endpoint(
+        background_tasks, gene_name, target_seq, files,
+        window_size, assignment_margin, indel_threshold, phred_threshold, rescue_ambiguous
+    )
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
