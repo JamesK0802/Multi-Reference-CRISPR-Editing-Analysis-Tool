@@ -9,6 +9,7 @@ export interface ExportParams {
   phredThreshold: number;
   indelThreshold: number;
   assignmentMargin: number;
+  rescueThreshold: number;
   analyzeAmbiguous: boolean;
   rescueAmbiguous: boolean;
   dataType: string;
@@ -110,6 +111,7 @@ export class ExcelExportService {
       ['Phred Threshold', params.phredThreshold],
       ['Indel Threshold (%)', params.indelThreshold],
       ['Assignment Margin (%)', params.assignmentMargin],
+      ['Rescue Threshold', params.rescueThreshold],
       ['Analyze Ambiguous Reads', params.analyzeAmbiguous ? 'Yes' : 'No'],
       ['Rescue Ambiguous Reads', params.rescueAmbiguous ? 'Yes' : 'No'],
       ['Data Type', params.dataType],
@@ -418,6 +420,7 @@ export class ExcelExportService {
           if (cell1 === 'Phred Threshold') params.phredThreshold = Number(val);
           if (cell1 === 'Indel Threshold (%)') params.indelThreshold = Number(val);
           if (cell1 === 'Assignment Margin (%)') params.assignmentMargin = Number(val);
+          if (cell1 === 'Rescue Threshold') params.rescueThreshold = Number(val);
           if (cell1 === 'Analyze Ambiguous Reads') params.analyzeAmbiguous = (val === 'Yes');
           if (cell1 === 'Rescue Ambiguous Reads') params.rescueAmbiguous = (val === 'Yes');
           if (cell1 === 'Data Type') params.dataType = val as string;

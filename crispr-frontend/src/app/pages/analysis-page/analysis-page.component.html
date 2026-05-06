@@ -23,44 +23,40 @@
 
       <div class="form-row">
         <div class="form-group flex-wide">
-          <label>Window Size (bp)</label>
-          <select formControlName="interestRegion" class="form-control">
-            <option [value]="50">50</option>
-            <option [value]="70">70</option>
-            <option [value]="90">90</option>
-            <option [value]="110">110</option>
-            <option [value]="130">130</option>
-          </select>
+          <label>
+            Window Size (bp)
+            <span class="info-icon">?
+              <span class="tooltip-text">Total analysis width around cut site.</span>
+            </span>
+          </label>
+          <input type="number" formControlName="interestRegion" class="form-control" />
         </div>
         <div class="form-group flex-wide">
-          <label>Data Filtering Level</label>
-          <select formControlName="phredLevel" class="form-control">
-            <option [value]="1">Level 1 (Light - 10)</option>
-            <option [value]="2">Level 2 (Normal - 20)</option>
-            <option [value]="3">Level 3 (Strict - 30)</option>
-            <option [value]="4">Level 4 (High - 40)</option>
-            <option [value]="5">Level 5 (Elite - 50)</option>
-          </select>
+          <label>
+            Data Filtering (Phred)
+            <span class="info-icon">?
+              <span class="tooltip-text">Minimum Phred quality score.</span>
+            </span>
+          </label>
+          <input type="number" formControlName="phredThreshold" class="form-control" />
         </div>
         <div class="form-group flex-wide">
-          <label>Assignment Margin (%)</label>
-          <select formControlName="marginPercent" class="form-control">
-            <option [value]="1">1%</option>
-            <option [value]="2">2%</option>
-            <option [value]="3">3%</option>
-            <option [value]="4">4%</option>
-            <option [value]="5">5%</option>
-          </select>
+          <label>
+            Assignment Margin (%)
+            <span class="info-icon">?
+              <span class="tooltip-text">Minimum score difference for target assignment.</span>
+            </span>
+          </label>
+          <input type="number" formControlName="marginPercent" class="form-control" />
         </div>
         <div class="form-group flex-wide">
-          <label>Indel Threshold (%)</label>
-          <select formControlName="indelPercent" class="form-control">
-            <option [value]="1">1%</option>
-            <option [value]="2">2%</option>
-            <option [value]="3">3%</option>
-            <option [value]="4">4%</option>
-            <option [value]="5">5%</option>
-          </select>
+          <label>
+            Indel Threshold (%)
+            <span class="info-icon">?
+              <span class="tooltip-text">Noise filter. Ignore groups below this %.</span>
+            </span>
+          </label>
+          <input type="number" formControlName="indelPercent" class="form-control" />
         </div>
         <div class="form-group toggle-group flex-narrow">
           <label for="ambiguousToggle">Analyze Ambiguous</label>
@@ -76,6 +72,18 @@
             <input type="checkbox" formControlName="rescueAmbiguous" id="rescueToggle" />
             <span class="toggle-slider"></span>
           </div>
+        </div>
+      </div>
+
+      <div class="advanced-params-row" *ngIf="state.analysisForm.get('rescueAmbiguous')?.value">
+        <div class="form-group" style="max-width: 180px; margin-left: auto; margin-top: -10px; margin-bottom: 10px;">
+          <label>
+            Rescue Filtering
+            <span class="info-icon">?
+              <span class="tooltip-text">Minimum cluster size for Ambiguous Rescue.</span>
+            </span>
+          </label>
+          <input type="number" formControlName="rescueThreshold" class="form-control" />
         </div>
       </div>
 

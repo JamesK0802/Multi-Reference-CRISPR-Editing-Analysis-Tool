@@ -36,7 +36,8 @@ def extract_window(sequence, cut_site, window_size, quality_scores=None):
     Extracts a fixed-size sequence window centered on cut_site.
     Used ONLY for the reference sequence window.
     """
-    half_window = window_size // 2
+    # USER REQUEST: window_size refers to the TOTAL width (± window_size // 2)
+    half_window = int(window_size) // 2
     start = max(0, cut_site - half_window)
     end = min(len(sequence), cut_site + half_window)
 
@@ -118,7 +119,7 @@ def process_read(read_seq, sgrna_seq, window_size=20, quality_scores=None):
         if idx == -1:
             return None, None
         cut  = calculate_cut_site(idx, sgrna_seq, is_rc=False)
-        half = window_size // 2
+        half = int(window_size)
         start = max(0, cut - half)
         end   = min(len(seq), cut + half)
         win   = seq[start:end]

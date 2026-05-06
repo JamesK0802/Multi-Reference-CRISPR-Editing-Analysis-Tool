@@ -57,22 +57,25 @@ export class AnalysisPageComponent implements OnInit {
     const formData = new FormData();
     this.state.selectedFiles.forEach(f => formData.append('files', f, f.name));
     formData.append('data_type', 'single-end');
-    formData.append('interest_region', (rawValue.interestRegion || 90).toString());
+    formData.append('interest_region', (rawValue.interestRegion ?? 90).toString());
 
-    const phredVal = (rawValue.phredLevel || 1) * 10;
-    const indelVal = (rawValue.indelPercent || 1) * 1.0;
-    const marginVal = (rawValue.marginPercent || 2) / 100;
+    const phredVal = rawValue.phredThreshold ?? 20;
+    const rescueThreshold = rawValue.rescueThreshold ?? 20;
+    const indelVal = (rawValue.indelPercent ?? 1) * 1.0;
+    const marginVal = (rawValue.marginPercent ?? 3) / 100;
 
     formData.append('phred_threshold', phredVal.toString());
     formData.append('indel_threshold', indelVal.toString());
     formData.append('is_multi_reference', 'true');
     formData.append('assignment_margin_threshold', marginVal.toString());
+    formData.append('rescue_threshold', rescueThreshold.toString());
 
     this.state.lastRunParams = {
-      windowSize: rawValue.interestRegion || 90,
+      windowSize: rawValue.interestRegion ?? 90,
       phredThreshold: phredVal,
       indelThreshold: indelVal,
-      assignmentMargin: (rawValue.marginPercent || 2),
+      assignmentMargin: (rawValue.marginPercent ?? 3),
+      rescueThreshold: rescueThreshold,
       analyzeAmbiguous: rawValue.analyzeAmbiguous || false,
       rescueAmbiguous: rawValue.rescueAmbiguous || false,
       dataType: 'single-end',
@@ -86,7 +89,7 @@ export class AnalysisPageComponent implements OnInit {
         target_id: t.target_id?.trim() || `T${ti + 1}`,
         sgrna_seq: t.gRNA,
         reference_seq: g.gene_reference,
-        window_size: rawValue.interestRegion || 90
+        window_size: Number(rawValue.interestRegion ?? 90)
       }))
     }));
     formData.append('targets', JSON.stringify(genesPayload));

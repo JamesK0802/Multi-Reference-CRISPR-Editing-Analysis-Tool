@@ -405,6 +405,68 @@ label {
   font-weight: 700;
   color: #7f8c8d;
   margin-bottom: 6px;
+  position: relative;
+}
+
+.info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  background: #cbd5e1;
+  color: #fff;
+  border-radius: 50%;
+  font-size: 10px;
+  margin-left: 4px;
+  cursor: help;
+  vertical-align: middle;
+  position: relative; /* For tooltip positioning */
+}
+
+.info-icon:hover {
+  background: #94a3b8;
+}
+
+/* Custom Tooltip Styling */
+.tooltip-text {
+  visibility: hidden;
+  width: 220px;
+  background-color: #334155;
+  color: #fff;
+  text-align: center;
+  border-radius: 6px;
+  padding: 8px 12px;
+  position: absolute;
+  z-index: 1000;
+  bottom: 150%; /* Position above */
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity 0.15s ease-in-out;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  font-weight: 500;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  white-space: normal;
+}
+
+.tooltip-text::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin-left: -6px;
+  border-width: 6px;
+  border-style: solid;
+  border-color: #334155 transparent transparent transparent;
+}
+
+.info-icon:hover .tooltip-text {
+  visibility: visible;
+  opacity: 1;
 }
 
 input, select, textarea {
@@ -1534,4 +1596,42 @@ select.form-control {
   background-size: 16px;
   padding-right: 40px;
   cursor: pointer;
+}
+
+/* Nav Dropdown */
+.nav-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-content {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  background-color: #fff;
+  min-width: 200px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  border-radius: 8px;
+  z-index: 1000;
+  border: 1px solid #e2e5ea;
+  padding: 8px 0;
+}
+
+.nav-dropdown:hover .dropdown-content {
+  display: block;
+}
+
+.dropdown-item {
+  color: #334155;
+  padding: 10px 16px;
+  text-decoration: none;
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.dropdown-item:hover, .dropdown-item.active {
+  background-color: #f1f5f9;
+  color: #166534;
 }

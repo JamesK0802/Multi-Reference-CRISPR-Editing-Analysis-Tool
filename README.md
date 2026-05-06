@@ -2,13 +2,13 @@
 
 # Overview
 
-The CRISPR Analysis Platform is a high-performance, academic-grade desktop application designed to quantify genome editing efficiency from sequencing data. It supports a **Unified Multi-Reference** workflow, allowing researchers to process mixed or multiple FASTQ files across various genetic loci in a single run with granular result scoping and a dedicated result restoration viewer.
+The CRISPR Analysis Platform is a high-performance, academic-grade web application designed to quantify genome editing efficiency from sequencing data. It supports a **Unified Multi-Reference** workflow, allowing researchers to process mixed or multiple FASTQ files across various genetic loci in a single run with granular result scoping and a dedicated result restoration viewer.
 
 ## Key Features
 
-- **🌐 Multi-Page Academic Architecture (v1.6.0)**: Dedicated routes for Analysis, Benchmarking, and Result Viewing with a professional ANU Research School of Biology UI.
+- **🌐 Multi-Page Academic Architecture (v1.8.0)**: Dedicated routes for Analysis, Benchmarking, and Result Viewing with a professional ANU Research School of Biology UI.
 - **📂 Multi-File Result Scoping**: Switch between "All Merged" view and individual per-file analysis directly in the results dashboard.
-- **🛡️ Enhanced Rescue Pipeline (v1.6.0)**: Advanced k-mer clustering with increased stringency (threshold=20) to reliably re-assign ambiguous reads.
+- **🛡️ Enhanced Rescue Pipeline (v1.7.0)**: Advanced k-mer clustering with user-defined stringency to reliably re-assign ambiguous reads.
 - **📊 Result Viewer Tab**: "Restore Session" by dragging and dropping an exported Excel report—reconstruct entire dashboards without raw FASTQ files.
 - **🧬 Unified Classification Core**: A shared k-mer scoring engine (`classifier.py`) powers both analysis and benchmarking, ensuring 100% statistical parity.
 - **🔍 Auto-Centering Annotation Grid**: Horizontally scrollable sequence viewport that automatically focuses on the gRNA and cut-site for instant inspection.
@@ -18,7 +18,6 @@ The CRISPR Analysis Platform is a high-performance, academic-grade desktop appli
 
 - **Backend**: Python 3.9+, [FastAPI](https://fastapi.tiangolo.com/), [Biopython](https://biopython.org/)
 - **Frontend**: [Angular 21](https://angular.dev/), [Reactive Forms](https://angular.io/guide/reactive-forms), [Chart.js](https://www.chartjs.org/)
-- **Desktop**: [Electron](https://www.electronjs.org/) (Stable v1.6.0 wrapper)
 - **Core Engine**: Custom k-mer demultiplexing + SequenceMatcher-based indel classification.
 
 ## Project Structure
@@ -50,6 +49,25 @@ The CRISPR Analysis Platform is a high-performance, academic-grade desktop appli
 ---
 
 ## Version History
+
+### v1.8.0 - Server-Backed PCR Protocol Manager (2026-05-06)
+- **New Feature**: **Server-Backed PCR Preset Manager** integrated with SQLite persistence.
+- **Protocol Management**: Select from lab-standard presets (Taq, Q5) or build **Custom Protocols** from scratch with dynamic component management.
+- **Precision Engine**: Centralized unit normalization (mM, µM, nM) with precise C1V1 conversion logic.
+- **Lab Optimization**: Default reaction volume updated to **20 µL**; warnings now trigger based on **Total Bulk** volume for realistic pipetting safety.
+- **UI/UX**: Premium dual-pane calculator interface with real-time result updates and professional preparation tables.
+- **PDF Export (v2.0)**: Enhanced PDF protocol generation including experiment settings (Reactions, Overage, Vol/Rxn) and streamlined component views.
+- **Backend**: FastAPI CRUD endpoints for managing protocol presets; automated database seeding.
+- **Bug Fix**: Resolved jsPDF build issues and CSS micro-unit symbol (`µ`) display corruption.
+
+### v1.7.0 - User-Driven Parameterization & Precision Scoring (2026-05-06)
+- **Bug Fix (Precision)**: Resolved a critical Javascript falsy evaluation bug where numeric inputs of `0` (e.g., Indel Threshold) were being overridden by default values. Transitioned to nullish coalescing (`??`) for all parameter parsing.
+- **Algorithm (Scoring)**: Implemented a ceiling cap (`min(1.0, ...)`) on the K-mer scoring system to prevent scores from exceeding 100% in repetitive genomic regions, ensuring accurate assignment margin calculations.
+- **New Feature**: **PCR Setup Calculator** integrated. A specialized tool for calculating master mix and primer volumes, with PDF report generation and pipetting error warnings.
+- **UI/UX**: Added **Interactive Tooltips** across all analysis parameters for immediate user guidance.
+- **Parameterization**: Fully exposed all core pipeline parameters (`Window Size`, `Phred Threshold`, `Assignment Margin`, `Indel Threshold`, `Rescue Filtering`) to the UI, removing previous hardcoded presets.
+- **Rescue Logic**: Added a **Rescue Ambiguous** toggle with conditional UI rendering, allowing users to choose between strict classification and similarity-based rescue.
+- **Infrastructure**: **Removed Electron support**. The platform is now fully focused on a high-performance Web/Browser environment for better accessibility and updates.
 
 ### v1.6.0 - Academic Platform Refactor (2026-04-30)
 - **Major Architecture**: Refactored into a proper **multi-page Angular app** with dedicated routing and a persistent top navigation bar.

@@ -1,6 +1,6 @@
 {
   "name": "crispr-frontend",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
@@ -20,6 +20,8 @@
     "chart.js": "^4.5.1",
     "exceljs": "^4.4.0",
     "file-saver": "^2.0.5",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.7",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"
   },

@@ -50,14 +50,19 @@ def run_analysis_on_reads(data, targets, phred_threshold=10, indel_threshold=1.0
         target_id     = target.get("target_id")
         reference_seq = target.get("reference_seq")
         sgrna_seq     = target.get("sgrna_seq")
-        window_size   = target.get("window_size", 90)
+        window_size   = int(target.get("window_size", 90))
 
         if not reference_seq:
             print(f"  [WARNING] Target {target_id} has no reference sequence, skipping.")
             continue
 
-        # ── Step 1: Locate gRNA in reference ──────────────────────────────────
-        ref_sgrna_start, is_rc_in_ref = find_target_in_reference(reference_seq, sgrna_seq)
+        # ── Step 1 & 2: Locate gRNA and Build Reference Window ────────────────
+        import core.classifier as classifier
+        cut_info = classifier.find_grna_cut_site(reference_seq, sgrna_seq)
+        
+        is_rc_in_ref = (cut_info['strand'] == 'reverse')
+        ref_sgrna_start = cut_info['grna_start']
+        ref_cut_site = cut_info['cut_site']
 
         if ref_sgrna_start == -1:
             print(f"  [CRITICAL WARNING] Target '{target_id}' gRNA '{sgrna_seq}' NOT FOUND in reference (len={len(reference_seq)})!")
@@ -70,9 +75,7 @@ def run_analysis_on_reads(data, targets, phred_threshold=10, indel_threshold=1.0
 
         print(f"  [DEBUG] Processing Target '{target_id}' at idx {ref_sgrna_start} (RC={is_rc_in_ref})")
 
-        # ── Step 2: Build reference window ────────────────────────────────────
-        ref_cut_site = calculate_cut_site(ref_sgrna_start, sgrna_seq, is_rc=is_rc_in_ref)
-        ref_window   = extract_window(reference_seq, ref_cut_site, window_size)
+        ref_window = classifier.extract_window(reference_seq, ref_cut_site, window_size)
         
         # ROOT CAUSE FIX: The display and alignment must ALWAYS use the canonical forward orientation.
         # Do NOT reverse_complement the ref_window here.
@@ -447,7 +450,7 @@ def process_files(file_paths, targets, data_type="single-end", phred_threshold=3
             
     return final_payload
 
-def process_files_multi(file_paths, genes_payload, data_type="single-end", phred_threshold=30, indel_threshold=1.0, margin_threshold=0.05, progress_callback=None, analyze_ambiguous=False, rescue_ambiguous=False):
+def process_files_multi(file_paths, genes_payload, data_type="single-end", phred_threshold=30, indel_threshold=1.0, margin_threshold=0.05, progress_callback=None, analyze_ambiguous=False, rescue_ambiguous=False, rescue_threshold=20):
     """
     Processes file paths for multi-reference analysis with fine-grained progress.
     Emits file / demux / gene / target level progress events.
@@ -563,29 +566,7 @@ def process_files_multi(file_paths, genes_payload, data_type="single-end", phred
             amb_reads_data = [(r["seq"], r["qual"]) for r in demux_result["ambiguous_reads"]]
             
             if rescue_ambiguous:
-                print(f"  [PROCESS_FILES_MULTI] Running robust k-mer rescue clustering...")
-                
-                def get_kmers(s, k=10):
-                    return set(s[i:i+k] for i in range(len(s)-k+1)) if len(s) >= k else set()
-                
-                clusters = [] # list of (kmers, representative_seq, rep_qual, [reads])
-                for r in amb_reads_data:
-                    seq = r[0]
-                    qual = r[1]
-                    kmers = get_kmers(seq)
-                    if not kmers:
-                        continue
-                    found = False
-                    for c in clusters:
-                        rep_kmers = c[0]
-                        intersection = len(kmers & rep_kmers)
-                        sim = intersection / max(len(kmers), 1)
-                        if sim >= 0.65: # ~65% k-mer overlap roughly corresponds to 85% sequence identity
-                            c[3].append(r)
-                            found = True
-                            break
-                    if not found:
-                        clusters.append((kmers, seq, qual, [r]))
+                print(f"  [PROCESS_FILES_MULTI] Running per-gene loose demux and exact-match rescue...")
                 
                 rescued_by_class = {g["gene"]: [] for g in genes_payload}
                 unresolved_reads = []
@@ -594,7 +575,7 @@ def process_files_multi(file_paths, genes_payload, data_type="single-end", phred
                 for g in genes_payload:
                     for t in g.get("targets", []):
                         cut_info = classifier.find_grna_cut_site(g["sequence"], t["sgrna_seq"])
-                        win_size = t.get("window_size", 90)
+                        win_size = int(t.get("window_size", 90))
                         ref_win = classifier.extract_window(g["sequence"], cut_info["cut_site"], win_size)
                         classifier_classes.append({
                             "gene": g["gene"],
@@ -602,30 +583,43 @@ def process_files_multi(file_paths, genes_payload, data_type="single-end", phred
                             "ref_window": ref_win
                         })
                 
-                for c in clusters:
-                    cluster_reads = c[3]
-                    if len(cluster_reads) < 20:
-                        unresolved_reads.extend(cluster_reads)
+                # 1. Loosely assign each read to a target and extract read_inner using anchors
+                gene_read_groups = {g["gene"]: {} for g in genes_payload}
+                
+                for r in amb_reads_data:
+                    seq = r[0]
+                    qual = r[1]
+                    
+                    scores = []
+                    for c in classifier_classes:
+                        # We know these reads have anchors, so use them to extract the exact inner region!
+                        usable, reason, best_res = classifier.is_read_usable(seq, qual, c["ref_window"], phred_threshold)
+                        if usable:
+                            score = classifier.score_read_against_window(seq, c["ref_window"])
+                            scores.append((score, c["gene"], best_res["read_inner"]))
+                    
+                    scores.sort(reverse=True, key=lambda x: x[0])
+                    if not scores:
+                        unresolved_reads.append(r)
                         continue
                         
-                    representative = c[1]
-                    rep_qual = c[2]
+                    top1_score, top1_class, read_inner = scores[0]
                     
-                    best_score = -1.0
-                    best_class = None
-                    
-                    for c in classifier_classes:
-                        usable, _, _ = classifier.is_read_usable(representative, rep_qual, c["ref_window"], phred_threshold)
-                        if usable:
-                            score = classifier.score_read_against_window(representative, c["ref_window"])
-                            if score > best_score:
-                                best_score = score
-                                best_class = c["gene"]
-                    
-                    if best_class is None:
-                        unresolved_reads.extend(cluster_reads)
-                    else:
-                        rescued_by_class[best_class].extend(cluster_reads)
+                    # No margin check (0%) - unconditionally loosely assign to top1
+                    key = read_inner.upper()
+                    if key not in gene_read_groups[top1_class]:
+                        gene_read_groups[top1_class][key] = []
+                    gene_read_groups[top1_class][key].append((r, key))
+                
+                # 2. Filter Exact Match clusters < rescue_threshold and finalize rescue
+                for g_name, exact_groups in gene_read_groups.items():
+                    for key, reads_list in exact_groups.items():
+                        if len(reads_list) < rescue_threshold:
+                            unresolved_reads.extend([item[0] for item in reads_list])
+                        else:
+                            # We construct a fake centroid using the cropped sequence so it aligns perfectly later
+                            # Just pass the raw reads to rescued_by_class, the classification logic handles the rest
+                            rescued_by_class[g_name].extend([item[0] for item in reads_list])
                         
                 print(f"  [PROCESS_FILES_MULTI] Rescued clusters formed: {sum(len(v) for v in rescued_by_class.values())} reads rescued. Unresolved: {len(unresolved_reads)}")
                 

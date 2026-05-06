@@ -97,7 +97,8 @@ def find_grna_cut_site(reference: str, grna: str) -> Dict[str, Any]:
     return {'strand': 'unknown', 'grna_start': -1, 'grna_end': -1, 'cut_site': ref_len // 2, 'pam': 'N/A', 'pam_found': False}
 
 def extract_window(reference: str, cut_site: int, window_size: int) -> str:
-    half = window_size // 2
+    # USER REQUEST: window_size refers to the TOTAL width (± window_size // 2)
+    half = int(window_size) // 2
     start = max(0, cut_site - half)
     end = min(len(reference), cut_site + half)
     return reference[start:end]
@@ -116,10 +117,40 @@ def _eval_anchors(seq: str, qual, ref_window: str, phred_threshold: float) -> Di
     ref_inner = ref_window[ANCHOR_LEN:-ANCHOR_LEN]
 
     seq_l = seq.lower()
-    li = seq_l.find(left_anchor)
-    if li == -1: return {'fail': 'no_anchor'}
-    ri = seq_l.find(right_anchor, li + ANCHOR_LEN + 1)
-    if ri == -1: return {'fail': 'no_anchor'}
+    target_inner_len = len(ref_inner)
+    
+    left_indices = []
+    idx = seq_l.find(left_anchor)
+    while idx != -1:
+        left_indices.append(idx)
+        idx = seq_l.find(left_anchor, idx + 1)
+        
+    right_indices = []
+    idx = seq_l.find(right_anchor)
+    while idx != -1:
+        right_indices.append(idx)
+        idx = seq_l.find(right_anchor, idx + 1)
+
+    if not left_indices or not right_indices:
+        return {'fail': 'no_anchor'}
+
+    best_li, best_ri = -1, -1
+    best_diff = float('inf')
+    for l_idx in left_indices:
+        for r_idx in right_indices:
+            if r_idx >= l_idx + ANCHOR_LEN:
+                inner_len = r_idx - (l_idx + ANCHOR_LEN)
+                diff = abs(inner_len - target_inner_len)
+                if diff < best_diff:
+                    best_diff = diff
+                    best_li = l_idx
+                    best_ri = r_idx
+
+    if best_li == -1 or best_ri == -1:
+        return {'fail': 'no_anchor'}
+
+    li = best_li
+    ri = best_ri
 
     read_inner = seq[li + ANCHOR_LEN: ri]
     
@@ -183,15 +214,21 @@ def score_read_against_window(read: str, ref_window: str, k: int = 10) -> float:
 
     ref_kmers = set(ref_up[i:i+k] for i in range(len(ref_up)-k+1) if 'N' not in ref_up[i:i+k])
     
-    hits = 0
-    total = 0
-    for strand in (read_up, reverse_complement(read_up)):
+    def get_strand_hits(strand):
+        hits = 0
         for i in range(len(strand)-k+1):
             kmer = strand[i:i+k]
-            if 'N' not in kmer:
-                total += 1
-                if kmer in ref_kmers: hits += 1
-    return hits / max(total, 1)
+            if 'N' not in kmer and kmer in ref_kmers:
+                hits += 1
+        return hits
+        
+    fw_hits = get_strand_hits(read_up)
+    rc_hits = get_strand_hits(reverse_complement(read_up))
+    best_hits = max(fw_hits, rc_hits)
+    
+    # Normalize by the number of k-mers in the reference window to avoid biasing towards larger windows
+    # Cap at 1.0 to prevent scores from exceeding 100% when the read contains repeated k-mers.
+    return min(1.0, best_hits / max(len(ref_kmers), 1))
 
 def apply_classification(
     read_seq: str, 

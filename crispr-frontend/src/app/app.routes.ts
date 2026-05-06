@@ -23,5 +23,9 @@ export const routes: Routes = [
       }
     ]
   },
+  { 
+    path: 'tools/pcr', 
+    loadComponent: () => import('./tools/pcr-calculator/pcr-calculator').then(m => m.PcrCalculator) 
+  },
   { path: '**', redirectTo: '' }
 ];

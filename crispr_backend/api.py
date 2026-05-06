@@ -8,11 +8,16 @@ import shutil
 import tempfile
 import uuid
 import time
+import pcr_presets
+
+# Initialize PCR Presets DB
+pcr_presets.init_db()
 
 # Import our analysis pipelines
 from run_local import process_files, process_files_multi
 
 app = FastAPI(title="CRISPR Analysis API")
+app.include_router(pcr_presets.router, prefix="/api")
 
 app.add_middleware(
     CORSMiddleware,
@@ -47,7 +52,8 @@ def background_analysis(
     is_multi_reference: bool = False,
     margin_threshold: float = 0.05,
     analyze_ambiguous: bool = False,
-    rescue_ambiguous: bool = False
+    rescue_ambiguous: bool = False,
+    rescue_threshold: int = 20
 ):
     print(f"[DEBUG] Background thread started for task {task_id}")
     try:
@@ -66,7 +72,8 @@ def background_analysis(
                 margin_threshold=margin_threshold,
                 progress_callback=update_progress,
                 analyze_ambiguous=analyze_ambiguous,
-                rescue_ambiguous=rescue_ambiguous
+                rescue_ambiguous=rescue_ambiguous,
+                rescue_threshold=rescue_threshold
             )
         else:
             results = process_files(
@@ -102,7 +109,8 @@ async def run_analysis_endpoint(
     is_multi_reference: bool = Form(False),
     assignment_margin_threshold: float = Form(0.05),
     analyze_ambiguous: bool = Form(False),
-    rescue_ambiguous: bool = Form(False)
+    rescue_ambiguous: bool = Form(False),
+    rescue_threshold: int = Form(20)
 ):
     clamped_interest = max(60, min(120, interest_region))
     print(f"[DEBUG] /analyze — files: {len(files)}, multi_ref: {is_multi_reference}")
@@ -141,7 +149,8 @@ async def run_analysis_endpoint(
             is_multi_reference,
             assignment_margin_threshold,
             analyze_ambiguous,
-            rescue_ambiguous
+            rescue_ambiguous,
+            rescue_threshold
         )
         return {"task_id": task_id}
 

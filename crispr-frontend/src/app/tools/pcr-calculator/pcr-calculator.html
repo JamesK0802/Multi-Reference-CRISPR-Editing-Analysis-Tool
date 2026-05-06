@@ -1,0 +1,172 @@
+<div class="pcr-container">
+  <header class="header-section">
+    <div class="header-content">
+      <h1>PCR Setup Calculator</h1>
+      <p>Precision protocol planning for CRISPR validation and benchmarking.</p>
+    </div>
+    <div class="header-actions">
+      <button class="btn-toggle" (click)="viewMode = viewMode === 'calculator' ? 'manager' : 'calculator'">
+        {{ viewMode === 'calculator' ? '⚙️ Manage Presets' : '🧪 Back to Calculator' }}
+      </button>
+    </div>
+  </header>
+
+  <!-- 🧪 CALCULATOR VIEW -->
+  <div *ngIf="viewMode === 'calculator'" class="calculator-view">
+    <div class="control-grid">
+      <!-- Left: Configuration -->
+      <section class="config-panel card">
+        <div class="card-header">
+          <h3>Protocol Configuration</h3>
+        </div>
+        <form [formGroup]="pcrForm" class="pcr-form">
+          <div class="form-group full-width">
+            <label>Select Preset</label>
+            <select formControlName="presetId" (change)="selectPreset($any($event.target).value)">
+              <option value="custom">Custom (Build from Scratch)</option>
+              <option *ngFor="let p of availablePresets" [value]="p.id">{{ p.name }}</option>
+            </select>
+          </div>
+
+          <div class="input-row">
+            <div class="form-group">
+              <label>Reactions</label>
+              <input type="number" formControlName="numReactions">
+            </div>
+            <div class="form-group">
+              <label>Overage (%)</label>
+              <input type="number" formControlName="overage">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Reaction Volume (µL)</label>
+            <input type="number" formControlName="reactionVolume">
+          </div>
+
+          <div class="components-section" formArrayName="components">
+            <div class="components-header">
+              <h4>Component Details</h4>
+              <button type="button" class="btn-small-add" (click)="addComponent()">+ Add Component</button>
+            </div>
+
+            <div *ngFor="let comp of componentForms.controls; let i = index" [formGroupName]="i" class="comp-item">
+              <div class="comp-header">
+                <input type="text" formControlName="name" class="name-edit-input" placeholder="Component Name">
+                <button type="button" class="btn-remove-mini" (click)="removeComponent(i)"
+                  title="Remove Component">×</button>
+              </div>
+
+              <!-- Mode Selector -->
+              <div class="mode-selector">
+                <label>Mode</label>
+                <select formControlName="calculationMode">
+                  <option *ngFor="let mode of calculationModes" [value]="mode.id">{{ mode.name }}</option>
+                </select>
+              </div>
+
+              <!-- Dynamic inputs based on calculation mode -->
+              <div class="comp-inputs">
+                <ng-container [ngSwitch]="comp.value.calculationMode">
+                  <!-- Concentration Based -->
+                  <div *ngSwitchCase="'primer_concentration'" class="input-grid">
+                    <div class="form-group">
+                      <label>Stock Conc</label>
+                      <div class="unit-input">
+                        <input type="number" formControlName="stockConcentration">
+                        <select formControlName="stockUnit">
+                          <option *ngFor="let u of concentrationUnits" [value]="u">{{ u }}</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="form-group">
+                      <label>Final Conc</label>
+                      <div class="unit-input">
+                        <input type="number" formControlName="finalConcentration">
+                        <select formControlName="finalUnit">
+                          <option *ngFor="let u of concentrationUnits" [value]="u">{{ u }}</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Fixed Ratio -->
+                  <div *ngSwitchCase="'fixed_ratio'" class="form-group">
+                    <label>Ratio Denominator (1/N)</label>
+                    <input type="number" formControlName="ratioDenominator">
+                  </div>
+
+                  <!-- Fixed Volume -->
+                  <div *ngSwitchCase="'fixed_volume'" class="form-group">
+                    <label>Volume (µL)</label>
+                    <input type="number" formControlName="fixedVolume">
+                  </div>
+                </ng-container>
+              </div>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <!-- Right: Results -->
+      <section class="results-panel">
+        <div class="results-header">
+          <button class="btn-secondary" style="margin-right: 12px;" (click)="saveAsPreset()">💾 Save as New
+            Preset</button>
+          <button class="btn-export" (click)="exportPDF()">📄 Export PDF Protocol</button>
+        </div>
+
+        <div class="card result-card" *ngIf="results">
+          <div class="card-header">
+            <h3>Preparation Table</h3>
+          </div>
+          <table class="prep-table">
+            <thead>
+              <tr>
+                <th>Component</th>
+                <th class="text-right">Per Reaction (µL)</th>
+                <th class="text-right">Total Bulk (µL)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let c of results.components" [class.master-mix]="c.includeInMasterMix">
+                <td>
+                  {{ c.name }}
+                  <small *ngIf="!c.includeInMasterMix" class="label-info">(Add separately)</small>
+                </td>
+                <td class="text-right">{{ c.perReaction | number:'1.2-2' }}</td>
+                <td class="text-right font-bold">{{ c.total | number:'1.2-2' }}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="alerts-section">
+            <div *ngFor="let err of errors" class="alert alert-error">⚠️ {{ err }}</div>
+            <div *ngFor="let warn of warnings" class="alert alert-warning">💡 {{ warn }}</div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ⚙️ MANAGER VIEW -->
+  <div *ngIf="viewMode === 'manager'" class="manager-view">
+    <div class="card">
+      <div class="card-header">
+        <h3>Server-Backed Presets</h3>
+      </div>
+      <div class="preset-list">
+        <div *ngFor="let p of availablePresets" class="preset-row">
+          <div class="preset-info">
+            <div class="preset-name">{{ p.name }}</div>
+            <div class="preset-meta">{{ p.category }} • {{ p.source || 'Local' }}</div>
+          </div>
+          <div class="preset-actions">
+            <button *ngIf="!p.isDefault" class="btn-delete" (click)="deletePreset(p.id!)">Delete</button>
+            <span *ngIf="p.isDefault" class="default-badge">System Default</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

@@ -73,7 +73,7 @@ export class AppStateService {
   progress$ = new BehaviorSubject<number>(0);
   progressDisplay$ = new BehaviorSubject<number>(0);
   progressStage$ = new BehaviorSubject<string>('');
-  
+
   progressInfo: ProgressInfo | null = null;
   private progressAnimId: any = null;
   debugLogs: string[] = [];
@@ -83,7 +83,7 @@ export class AppStateService {
   // ── Benchmark State ───────────────────────────────────────────────────────
   benchPhred = 10; benchWindow = 90; benchMargin = 3;
   benchRows: BenchmarkRow[] = [{ file: null, geneName: '', targetName: '', referenceSequence: '', grnaSequence: '' }];
-  benchIsLoading = false; 
+  benchIsLoading = false;
   benchProgress$ = new BehaviorSubject<number>(0);
   benchProgressDisplay$ = new BehaviorSubject<number>(0);
   benchStage$ = new BehaviorSubject<string>('');
@@ -163,8 +163,11 @@ export class AppStateService {
   // ── Form ───────────────────────────────────────────────────────────────────
   private initForm() {
     this.analysisForm = this.fb.group({
-      interestRegion: [90, [Validators.required, Validators.min(50), Validators.max(130)]],
-      phredLevel: [1], marginPercent: [2], indelPercent: [1],
+      interestRegion: [90, [Validators.required, Validators.min(10), Validators.max(500)]],
+      phredThreshold: [20, [Validators.required, Validators.min(1), Validators.max(1000)]],
+      rescueThreshold: [20, [Validators.required, Validators.min(1), Validators.max(1000)]],
+      marginPercent: [10, [Validators.required, Validators.min(0), Validators.max(100)]],
+      indelPercent: [2, [Validators.required, Validators.min(0), Validators.max(100)]],
       analyzeAmbiguous: [false], rescueAmbiguous: [false],
       genes: this.fb.array([this.createGeneGroup()])
     });
@@ -197,15 +200,15 @@ export class AppStateService {
     this.ngZone.run(() => {
       this.progress$.next(target);
       this.progressStage$.next(stage);
-      
+
       if (this.progressAnimId) { clearInterval(this.progressAnimId); this.progressAnimId = null; }
-      
+
       this.progressAnimId = setInterval(() => {
         this.ngZone.run(() => {
           const current = this.progressDisplay$.value;
           const goal = this.progress$.value;
           const diff = goal - current;
-          
+
           if (Math.abs(diff) < 0.5) {
             this.progressDisplay$.next(goal);
             if (this.progressAnimId) { clearInterval(this.progressAnimId); this.progressAnimId = null; }
@@ -221,15 +224,15 @@ export class AppStateService {
     this.ngZone.run(() => {
       this.benchProgress$.next(target);
       this.benchStage$.next(stage);
-      
+
       if (this.benchProgressAnimId) { clearInterval(this.benchProgressAnimId); this.benchProgressAnimId = null; }
-      
+
       this.benchProgressAnimId = setInterval(() => {
         this.ngZone.run(() => {
           const current = this.benchProgressDisplay$.value;
           const goal = this.benchProgress$.value;
           const diff = goal - current;
-          
+
           if (Math.abs(diff) < 0.3) {
             this.benchProgressDisplay$.next(goal);
             if (this.benchProgressAnimId) { clearInterval(this.benchProgressAnimId); this.benchProgressAnimId = null; }
@@ -296,10 +299,10 @@ export class AppStateService {
             ex.analysis_result.targets.forEach((extT: any, tidx: number) => {
               const newT = geneRes.analysis_result.targets[tidx]; if (!newT) return;
               const s1 = extT.summary, s2 = newT.summary;
-              const b1 = extT.breakdown || { out_of_frame:0, in_frame:0, no_indel:0, substitution:0 };
-              const b2 = newT.breakdown || { out_of_frame:0, in_frame:0, no_indel:0, substitution:0 };
-              b1.out_of_frame += b2.out_of_frame||0; b1.in_frame += b2.in_frame||0;
-              b1.no_indel += b2.no_indel||0; b1.substitution += b2.substitution||0;
+              const b1 = extT.breakdown || { out_of_frame: 0, in_frame: 0, no_indel: 0, substitution: 0 };
+              const b2 = newT.breakdown || { out_of_frame: 0, in_frame: 0, no_indel: 0, substitution: 0 };
+              b1.out_of_frame += b2.out_of_frame || 0; b1.in_frame += b2.in_frame || 0;
+              b1.no_indel += b2.no_indel || 0; b1.substitution += b2.substitution || 0;
               extT.breakdown = b1;
               s1.total_reads += s2.total_reads; s1.matched_reads += s2.matched_reads; s1.aligned_reads += s2.aligned_reads;
               const ta = s1.aligned_reads || 1;
@@ -312,7 +315,7 @@ export class AppStateService {
               if (newT.top_groups && extT.top_groups) {
                 const gm = new Map<string, any>();
                 [...extT.top_groups, ...newT.top_groups].forEach(g => { if (gm.has(g.read_inner)) { gm.get(g.read_inner).read_count += g.read_count; } else { gm.set(g.read_inner, { ...g }); } });
-                const mg = Array.from(gm.values()).sort((a,b) => b.read_count - a.read_count).slice(0, 10);
+                const mg = Array.from(gm.values()).sort((a, b) => b.read_count - a.read_count).slice(0, 10);
                 mg.forEach((g, i) => { g.group_rank = i + 1; g.read_pct = pct(g.read_count); });
                 extT.top_groups = mg;
               }
@@ -427,7 +430,7 @@ export class AppStateService {
     scopes.push({ sheetName: 'Merged', readFlow: { rawReads: this.totalMergedRawReads, phredPassed: this.totalMergedPhredPassed, anchorMatched: this.totalMergedAnchorMatched, assignedReads: totalAssigned, ambiguousReads: this.totalMergedAmbiguous }, genes: this.mergedGenes });
     for (let i = 0; i < this.allFileResults.length; i++) {
       const fr = this.allFileResults[i]; const mrd = fr?.multi_reference_result as MultiReferenceResponse | undefined; if (!mrd) continue;
-      const fn = (fr.fastq_file as string || '').split('/').pop() || `File${i+1}`; const fg = mrd.genes || [];
+      const fn = (fr.fastq_file as string || '').split('/').pop() || `File${i + 1}`; const fg = mrd.genes || [];
       const fa = fg.filter((g: GeneResult) => !g.is_ambiguous_derived && !g.is_rescued_derived).reduce((s: number, g: GeneResult) => s + g.assigned_read_count, 0);
       scopes.push({ sheetName: fn, readFlow: { rawReads: mrd.debug?.total_reads_parsed ?? 0, phredPassed: mrd.debug?.phred_passed_count ?? 0, anchorMatched: mrd.debug?.anchor_matched_count ?? 0, assignedReads: fa, ambiguousReads: mrd.ambiguous_read_count ?? 0 }, genes: fg });
     }
