@@ -64,7 +64,8 @@
               "buildTarget": "crispr-frontend:build:production"
             },
             "development": {
-              "buildTarget": "crispr-frontend:build:development"
+              "buildTarget": "crispr-frontend:build:development",
+              "proxyConfig": "proxy.conf.json"
             }
           },
           "defaultConfiguration": "development"
