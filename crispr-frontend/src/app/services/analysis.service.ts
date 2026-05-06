@@ -13,9 +13,9 @@ export interface TaskStatus {
 
 @Injectable({ providedIn: 'root' })
 export class AnalysisService {
-  private apiUrl = 'http://127.0.0.1:8000';
+  private apiUrl = '/api';
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) { }
 
   // ── CRISPR Analysis ─────────────────────────────────────────────────────────
   runAnalysis(formData: FormData): Observable<{ task_id: string } | AnalysisResponse> {

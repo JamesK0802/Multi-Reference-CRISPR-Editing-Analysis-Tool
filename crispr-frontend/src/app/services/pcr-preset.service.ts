@@ -35,7 +35,7 @@ export interface PcrPreset {
   providedIn: 'root'
 })
 export class PcrPresetService {
-  private apiUrl = 'http://127.0.0.1:8000/api/pcr-presets';
+  private apiUrl = '/api/pcr-presets';
 
   constructor(private http: HttpClient) {}
 
