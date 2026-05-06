@@ -93,6 +93,17 @@ def background_analysis(
                 try: os.remove(f)
                 except: pass
 
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    print(f"[DEBUG] Validation Error: {exc.errors()}")
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "body": str(exc.body)},
+    )
+
 @api_router.post("/analyze")
 async def run_analysis_endpoint(
     background_tasks: BackgroundTasks,
@@ -101,11 +112,17 @@ async def run_analysis_endpoint(
     phred_threshold: int = Form(20),
     indel_threshold: float = Form(1.0),
     assignment_margin_threshold: float = Form(0.02),
-    analyze_ambiguous: bool = Form(False),
-    rescue_ambiguous: bool = Form(True),
+    analyze_ambiguous: str = Form("false"),
+    rescue_ambiguous: str = Form("true"),
     rescue_threshold: int = Form(20),
-    interest_region: int = Form(90) # Received but passed inside targets JSON usually
+    interest_region: int = Form(90)
 ):
+    print(f"[DEBUG] Analyze requested with {len(files)} files and targets: {targets[:100]}...")
+    
+    # Convert string booleans
+    do_analyze = analyze_ambiguous.lower() == "true"
+    do_rescue = rescue_ambiguous.lower() == "true"
+
     task_id = str(uuid.uuid4())
     tasks[task_id] = {
         "status": "pending",
@@ -132,8 +149,8 @@ async def run_analysis_endpoint(
         phred_threshold,
         indel_threshold,
         assignment_margin_threshold,
-        analyze_ambiguous,
-        rescue_ambiguous,
+        do_analyze,
+        do_rescue,
         rescue_threshold
     )
 
