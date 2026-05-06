@@ -40,36 +40,36 @@ async def get_task_status(task_id: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Existing CRISPR Analysis endpoint
+# CRISPR Analysis Background Worker
 # ─────────────────────────────────────────────────────────────────────────────
 
 def background_analysis(
     task_id: str,
-    gene_name: str,
-    target_seq: str,
     files: List[str],
-    window_size: int,
-    assignment_margin: int,
-    indel_threshold: float,
+    targets_json: str,
     phred_threshold: int,
-    rescue_ambiguous: bool
+    indel_threshold: float,
+    assignment_margin: float,
+    analyze_ambiguous: bool,
+    rescue_ambiguous: bool,
+    rescue_threshold: int
 ):
     try:
         tasks[task_id]["status"] = "running"
         tasks[task_id]["stage"] = "Processing FASTQ files..."
         
-        # Determine if we should use multi-file processing or single
-        # In the new UI, we always send as a list, but we might want to preserve the logic
+        # Parse the JSON payload from the frontend
+        genes_payload = json.loads(targets_json)
         
         results = process_files_multi(
-            gene_name=gene_name,
-            target_seq=target_seq,
-            fastq_paths=files,
-            window_size=window_size,
-            assignment_margin=assignment_margin,
-            indel_threshold=indel_threshold,
+            file_paths=files,
+            genes_payload=genes_payload,
             phred_threshold=phred_threshold,
+            indel_threshold=indel_threshold,
+            margin_threshold=assignment_margin,
+            analyze_ambiguous=analyze_ambiguous,
             rescue_ambiguous=rescue_ambiguous,
+            rescue_threshold=rescue_threshold,
             progress_callback=lambda p, s: (
                 tasks[task_id].update({"progress": p, "stage": s})
             )
@@ -96,14 +96,15 @@ def background_analysis(
 @api_router.post("/analyze")
 async def run_analysis_endpoint(
     background_tasks: BackgroundTasks,
-    gene_name: str = Form(...),
-    target_seq: str = Form(...),
     files: List[UploadFile] = File(...),
-    window_size: int = Form(20),
-    assignment_margin: int = Form(2),
-    indel_threshold: float = Form(1.0),
+    targets: str = Form(...),
     phred_threshold: int = Form(20),
-    rescue_ambiguous: bool = Form(True)
+    indel_threshold: float = Form(1.0),
+    assignment_margin_threshold: float = Form(0.02),
+    analyze_ambiguous: bool = Form(False),
+    rescue_ambiguous: bool = Form(True),
+    rescue_threshold: int = Form(20),
+    interest_region: int = Form(90) # Received but passed inside targets JSON usually
 ):
     task_id = str(uuid.uuid4())
     tasks[task_id] = {
@@ -126,14 +127,14 @@ async def run_analysis_endpoint(
     background_tasks.add_task(
         background_analysis,
         task_id,
-        gene_name,
-        target_seq,
         temp_paths,
-        window_size,
-        assignment_margin,
-        indel_threshold,
+        targets,
         phred_threshold,
-        rescue_ambiguous
+        indel_threshold,
+        assignment_margin_threshold,
+        analyze_ambiguous,
+        rescue_ambiguous,
+        rescue_threshold
     )
 
     return {"task_id": task_id}
@@ -149,16 +150,12 @@ async def benchmark_split_preview(
     files: List[UploadFile] = File(...),
     test_ratio: float = Form(0.2)
 ):
-    """Synchronous preview of train/test split counts."""
-    # Temporarily save files to count reads
     total_reads = 0
     temp_dir = tempfile.gettempdir()
     for f in files:
         path = os.path.join(temp_dir, f"{uuid.uuid4()}_{f.filename}")
         with open(path, "wb") as buffer:
             shutil.copyfileobj(f.file, buffer)
-        
-        # Simple read count (every 4th line in FASTQ)
         with open(path, "r") as r:
             total_reads += sum(1 for line in r) // 4
         os.remove(path)
@@ -182,9 +179,7 @@ def background_benchmark(
 ):
     try:
         from core.benchmark import run_benchmarking
-        
         tasks[task_id]["status"] = "running"
-        
         results = run_benchmarking(
             target_seq=target_seq,
             fastq_paths=files,
@@ -193,7 +188,6 @@ def background_benchmark(
             phred_threshold=phred_threshold,
             progress_callback=lambda p, s: tasks[task_id].update({"progress": p, "stage": s})
         )
-
         tasks[task_id]["status"] = "completed"
         tasks[task_id]["result"] = results
         tasks[task_id]["progress"] = 100
@@ -243,38 +237,16 @@ async def run_benchmark_endpoint(
 
     return {"task_id": task_id}
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Include Routers
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Include PCR presets router into our api_router
+# Include PCR presets router
 api_router.include_router(pcr_presets.router)
 
-# Include the main api_router into the app
+# Include main api_router
 app.include_router(api_router)
 
-# ── Legacy Redirects (Optional) ──────────────────────────────────────────────
+# ── Legacy Redirects (No prefix) ──
 @app.get("/status/{task_id}", include_in_schema=False)
 async def legacy_status(task_id: str):
     return await get_task_status(task_id)
-
-@app.post("/analyze", include_in_schema=False)
-async def legacy_analyze(
-    background_tasks: BackgroundTasks,
-    gene_name: str = Form(...),
-    target_seq: str = Form(...),
-    files: List[UploadFile] = File(...),
-    window_size: int = Form(20),
-    assignment_margin: int = Form(2),
-    indel_threshold: float = Form(1.0),
-    phred_threshold: int = Form(20),
-    rescue_ambiguous: bool = Form(True)
-):
-    return await run_analysis_endpoint(
-        background_tasks, gene_name, target_seq, files,
-        window_size, assignment_margin, indel_threshold, phred_threshold, rescue_ambiguous
-    )
 
 if __name__ == "__main__":
     import uvicorn
